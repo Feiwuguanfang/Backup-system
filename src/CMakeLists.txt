@@ -13,6 +13,9 @@ else()
   target_compile_options(backup_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# 链接JSON库
+target_link_libraries(backup_core PUBLIC nlohmann_json::nlohmann_json)
+
 # 主应用程序（仅包含入口文件main.cpp）
 add_executable(backup_app main.cpp)
 target_link_libraries(backup_app PRIVATE backup_core)  # 链接核心库
