@@ -10,10 +10,11 @@ file(GLOB_RECURSE TEST_SOURCES "*.cpp")
 # 创建测试可执行文件
 add_executable(test_app ${TEST_SOURCES})
 
-# 链接依赖（核心库+GTest）
+# 链接依赖（核心库+GTest+JSON库）
 target_link_libraries(test_app PRIVATE 
-  backup_core       # 依赖主程序核心库
-  gtest             # 依赖GTest库
+  backup_core                # 依赖主程序核心库
+  gtest                      # 依赖GTest库
+  nlohmann_json::nlohmann_json  # 添加JSON库依赖
 )
 
 # 添加测试用例（CTest识别）
