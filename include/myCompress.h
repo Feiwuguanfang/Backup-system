@@ -3,14 +3,21 @@
 
 #include "ICompress.h"
 
-class MyCompress : public ICompress{
+class MyCompress : public ICompress {
 public:
-    
+    MyCompress();
     virtual ~MyCompress() = default;
-    // 压缩:将文件经过压缩到指定目录
-    bool doCompress(const std::string& sourcePath, const std::string& destPath);
-    // 解压:将文件经过解压到指定目录
-    bool doUnCompress(const std::string& sourcePath, const std::string& destPath);
+    
+    // 实现ICompress接口的方法
+    virtual bool compressFile(const std::string& sourcePath, const std::string& destPath) override;
+    virtual bool decompressFile(const std::string& sourcePath, const std::string& destPath) override;
+    virtual bool compressData(const std::vector<char>& sourceData, std::vector<char>& destData) override;
+    virtual bool decompressData(const std::vector<char>& sourceData, std::vector<char>& destData) override;
+    virtual void setCompressionLevel(int level) override;
+    virtual std::string getFileExtension() const override;
+    
+private:
+    int m_compressionLevel; // 压缩级别
 };
 
 #endif

@@ -6,10 +6,28 @@
 
 CBackupRecorder::CBackupRecorder()
 {
+    // 设定默认备份记录文件路径
+    recorderFilePath = "backup_records.json";
+    // 先检查有没有这个文件
+    std::ifstream checkFile(recorderFilePath);
+    if(!checkFile.is_open()){
+        // 如果文件不存在，创建一个空文件
+        std::ofstream createFile(recorderFilePath);
+        createFile.close();
+    }
+    loadBackupRecordsFromFile(recorderFilePath);
+}
+
+// 构造函数
+CBackupRecorder::CBackupRecorder(const std::string& filePath)
+{
+    recorderFilePath = filePath;
+    loadBackupRecordsFromFile(recorderFilePath);
 }
 
 CBackupRecorder::~CBackupRecorder()
 {
+    saveBackupRecordsToFile(recorderFilePath);
 }
 
 
