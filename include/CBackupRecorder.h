@@ -8,10 +8,14 @@ using json = nlohmann::json;
 
 // 定义结构体，用于记录备份记录
 struct BackupEntry{
-    std::string fileName;   // 源文件名
-    std::string destPath;   // 备份文件路径
-    std::string backupTime; // 备份时间
-    std::string checksum;   // 文件校验和
+    std::string fileName;        // 源文件名
+    std::string sourceFullPath;  // 源文件完整路径
+    std::string destDirectory;   // 备份目标目录
+    std::string backupFileName;  // 最终备份文件名
+    std::string backupTime;      // 备份时间
+    bool isEncrypted;            // 是否加密
+    bool isPacked;               // 是否打包
+    bool isCompressed;           // 是否压缩
 };
 
 // 为 BackupEntry 提供 nlohmann/json 所需的序列化支持
@@ -20,16 +24,24 @@ namespace nlohmann {
     struct adl_serializer<BackupEntry> {
         static void to_json(json& j, const BackupEntry& entry) {
             j = json{{"file_name", entry.fileName},
-                     {"destination_path", entry.destPath},
+                     {"source_full_path", entry.sourceFullPath},
+                     {"destination_directory", entry.destDirectory},
+                     {"backup_file_name", entry.backupFileName},
                      {"backup_time", entry.backupTime},
-                     {"checksum", entry.checksum}};
+                     {"is_encrypted", entry.isEncrypted},
+                     {"is_packed", entry.isPacked},
+                     {"is_compressed", entry.isCompressed}};
         }
 
         static void from_json(const json& j, BackupEntry& entry) {
             j.at("file_name").get_to(entry.fileName);
-            j.at("destination_path").get_to(entry.destPath);
+            j.at("source_full_path").get_to(entry.sourceFullPath);
+            j.at("destination_directory").get_to(entry.destDirectory);
+            j.at("backup_file_name").get_to(entry.backupFileName);
             j.at("backup_time").get_to(entry.backupTime);
-            j.at("checksum").get_to(entry.checksum);
+            j.at("is_encrypted").get_to(entry.isEncrypted);
+            j.at("is_packed").get_to(entry.isPacked);
+            j.at("is_compressed").get_to(entry.isCompressed);
         }
     };
 }
@@ -43,6 +55,7 @@ inline bool operator==(const BackupEntry& lhs, const BackupEntry& rhs) {
 class CBackupRecorder{
 public:
     CBackupRecorder();
+    CBackupRecorder(const std::string& filePath);
     ~CBackupRecorder();
 
     // 从文件中加载备份目录（这里假定程序有一个固定的备份记录文件）
@@ -83,6 +96,7 @@ public:
 
 private:
     std::vector<BackupEntry> backupRecords; // 备份记录容器
+    std::string recorderFilePath; // 备份记录文件路径
 };
 
 

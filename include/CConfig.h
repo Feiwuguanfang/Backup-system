@@ -3,86 +3,120 @@
 
 #include <string>
 #include <vector>
-#include <map>
-#include <memory>
 #include <regex>
-#include <iostream>
+#include <memory>
 
-// 配置类，用于存储备份相关的配置，后续需要在这里进行增添
-// 配置类，用于存储备份相关的配置
+// 配置类，负责存储和管理备份系统的所有配置项
 class CConfig {
 public:
+    // 默认构造函数
     CConfig();
+    
+    // 完整构造函数，直接提供所有必要参数
+    CConfig(const std::string& sourcePath, const std::string& destinationPath);
+    
+    // 析构函数
     ~CConfig();
     
-    // ===== 基本配置 =====
-    // 源路径列表
-    std::vector<std::string> sourcePaths;
+    // 允许拷贝构造和赋值
+    CConfig(const CConfig&) = default;
+    CConfig& operator=(const CConfig&) = default;
     
-    // 目标路径
-    std::string destinationPath;
+    // 允许移动构造和移动赋值
+    CConfig(CConfig&&) noexcept = default;
+    CConfig& operator=(CConfig&&) noexcept = default;
+    
+    // ===== 基本配置设置器和获取器 =====
+    // 设置源路径列表 (必须)
+    CConfig& setSourcePath(const std::string& path);
+    const std::string& getSourcePath() const;
+    
+    // 设置目标路径 (必须)
+    CConfig& setDestinationPath(const std::string& path);
+    const std::string& getDestinationPath() const;
     
     // ===== 文件筛选配置 =====
-    // 包含的文件正则表达式列表
-    std::vector<std::regex> includePatterns;
+    CConfig& setRecursiveSearch(bool value);
+    bool isRecursiveSearch() const;
     
-    // 排除的文件正则表达式列表
-    std::vector<std::regex> excludePatterns;
+    CConfig& setFollowSymlinks(bool value);
+    bool isFollowSymlinks() const;
     
-    // 是否递归搜索子目录
-    bool recursiveSearch;
+    CConfig& addIncludePattern(const std::string& pattern);
+    const std::vector<std::regex>& getIncludePatterns() const;
     
-    // 是否遵循符号链接
-    bool followSymlinks;
+    CConfig& addExcludePattern(const std::string& pattern);
+    const std::vector<std::regex>& getExcludePatterns() const;
     
     // ===== 备份行为配置 =====
-    // 是否启用打包
-    bool enablePacking;
+    CConfig& setPackingEnabled(bool value);
+    bool isPackingEnabled() const;
     
-    // 打包类型
-    std::string packType;
+    CConfig& setPackType(const std::string& type);
+    const std::string& getPackType() const;
     
-    // 是否启用压缩
-    bool enableCompression;
+    CConfig& setCompressionEnabled(bool value);
+    bool isCompressionEnabled() const;
     
-    // 压缩类型
-    std::string compressionType;
+    CConfig& setCompressionType(const std::string& type);
+    const std::string& getCompressionType() const;
     
-    // 压缩级别 (1-9)
-    int compressionLevel;
+    CConfig& setCompressionLevel(int level);
+    int getCompressionLevel() const;
     
-    // 是否启用加密
-    bool enableEncryption;
+    CConfig& setEncryptionEnabled(bool value);
+    bool isEncryptionEnabled() const;
     
-    // 加密密钥
-    std::string encryptionKey;
-    
-    // ===== 验证和日志配置 =====
-    // 是否验证备份完整性
-    bool verifyBackup;
-    
-    // 日志级别 (0: 无, 1: 错误, 2: 警告, 3: 信息, 4: 详细)
-    int logLevel;
+    CConfig& setEncryptionKey(const std::string& key);
+    const std::string& getEncryptionKey() const;
     
     // ===== 高级配置 =====
-    // 自定义选项的键值对存储
-    std::map<std::string, std::string> customOptions;
-    
-    // ===== 便捷方法 =====
-    // 添加包含模式
-    void addIncludePattern(const std::string& pattern);
-    
-    // 添加排除模式
-    void addExcludePattern(const std::string& pattern);
-    
-    // 设置自定义选项
-    void setCustomOption(const std::string& key, const std::string& value);
-    
-    // 获取自定义选项
+    CConfig& setCustomOption(const std::string& key, const std::string& value);
     std::string getCustomOption(const std::string& key, const std::string& defaultValue = "") const;
     
+    // ===== 便捷方法 =====
     // 检查文件是否应该被包含
     bool shouldIncludeFile(const std::string& filePath) const;
+    
+    // 验证配置的有效性
+    bool isValid() const;
+    
+    // 重置配置为默认状态
+    void reset();
+    
+    // 深拷贝配置
+    std::shared_ptr<CConfig> clone() const;
+    
+    // 输出配置摘要
+    std::string toString() const;
+    
+private:
+    // 基本配置
+    std::string sourcePath;
+    std::string destinationPath;
+    
+    // 文件筛选配置
+    bool recursiveSearch;
+    bool followSymlinks;
+    std::vector<std::regex> includePatterns;
+    std::vector<std::regex> excludePatterns;
+    // 后面还可能需要增加筛选的条件
+
+    // 比如文件大小范围
+
+    // 文件修改时间范围
+    
+    // 备份行为配置
+    bool enablePacking;
+    std::string packType;
+    bool enableCompression;
+    std::string compressionType;
+    int compressionLevel;
+    bool enableEncryption;
+    std::string encryptionKey;
+    
+    // 高级配置
+    std::map<std::string, std::string> customOptions;
 };
 
-#endif // _CCONFIG_H
+#endif // CCONFIG_H
