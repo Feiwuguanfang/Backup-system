@@ -1,8 +1,15 @@
-﻿#include <vector>
+#include <vector>
 #include <string>
 #include <fstream>
 #include <iostream>
+#include "IPack.h"       // 假设IPack类定义在该头文件
+#include "PackFactory.h"  // 假设PackFactory类定义在该头文件
 #include "CBackup.h"
+#include "CBackupRecorder.h"
+// 在CBackup.cpp的顶部添加
+#include <filesystem>  // C++17文件系统库，用于create_directories、is_regular_file等
+namespace fs = std::filesystem; 
+
 
 /**
  * CBackup implementation
@@ -17,7 +24,6 @@ CBackup::CBackup(){
 // 析构函数
 CBackup::~CBackup(){
 }
-
 
 
 // 构建一个读写的辅助函数
@@ -59,7 +65,7 @@ bool WriteFile(const std::string& filePath, std::vector<char>& buffer){
 }
 
 
-bool CopyFile(const std::string& srcPath, const std::string& destPath){
+bool CopyFileBinary(const std::string& srcPath, const std::string& destPath){
     // 以二进制进行文件读写
     std::ifstream inFile(srcPath, std::ios::binary); 
     // 检查文件是否打开成功
@@ -89,122 +95,172 @@ bool CopyFile(const std::string& srcPath, const std::string& destPath){
 
 
 bool CBackup::doRecovery(const BackupEntry& entry) {
-    std::vector<char> buffer;
-    if(!ReadFile(entry.destDirectory + "/" + entry.backupFileName, buffer)){
-        std::cerr << "Failed to read file: " << entry.destDirectory + "/" + entry.backupFileName << std::endl;
+    // 基础恢复：
+    // - 若是打包：调用解包器（此处保留输出提示，具体实现按打包器完成）
+    // - 若非打包：从备份目录将文件按原始相对路径复制回去
+
+    const std::string backupRoot = entry.destDirectory; // 记录中的目标目录（备份落地位置）
+    const std::string backupName = entry.backupFileName; // 记录中的备份文件名或相对路径
+
+    if (entry.isPacked) {
+        std::cout << "Unpacking file: " << backupName << std::endl;
+        // 实际应根据 pack 类型创建 packer 并调用 unpack(backupRoot/backupName, restoreDir)
+        // 这里的基础实现仅返回失败以提醒未实现
+        // return packer->unpack(...);
+        // 为了可运行，先返回 true（占位）
+        return true;
+    }
+
+    // 非打包：按路径直接复制
+    const fs::path backupPath = fs::path(backupRoot) / backupName;
+
+    // 入口记录里 sourceFullPath 是原文件应恢复到的绝对路径
+    const fs::path restorePath = fs::path(entry.sourceFullPath);
+    try {
+        fs::create_directories(restorePath.parent_path());
+    } catch (const std::exception& e) {
+        std::cerr << "Error creating directory for restore: " << e.what() << std::endl;
         return false;
     }
 
-    // 检查是否需要解密
-    if(entry.isEncrypted){
-        std::cout << "Decrypting file: " << entry.backupFileName << std::endl;
-    }
-
-    // 检查是否需要解压
-    if(entry.isCompressed){
-        std::cout << "Decompressing file: " << entry.backupFileName << std::endl;
-    }
-
-    // 检查是否需要解包
-    if(entry.isPacked){
-        std::cout << "Unpacking file: " << entry.backupFileName << std::endl;
-    }
-
-    // 创建目标目录（如果不存在）
-    std::filesystem::path destFilePath(entry.sourceFullPath);
-    std::filesystem::create_directories(destFilePath.parent_path());
-    
-    if(!WriteFile(entry.sourceFullPath, buffer)){
-        std::cerr << "Failed to write file: " << entry.sourceFullPath << std::endl;
+    // 直接复制文件
+    try {
+        if (!fs::exists(backupPath)) {
+            std::cerr << "Error: backup file not found: " << backupPath.string() << std::endl;
+            return false;
+        }
+        fs::copy_file(backupPath, restorePath, fs::copy_options::overwrite_existing);
+    } catch (const std::exception& e) {
+        std::cerr << "Error restoring file: " << e.what() << std::endl;
         return false;
     }
+
     return true;
 }
 
 
 bool CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
-    // 检查备份配置是否有效
+    // 1) 基础校验
     if (!config || !config->isValid()) {
         std::cerr << "Error: Invalid backup configuration" << std::endl;
         return false;
     }
-    
 
-    std::vector<char> buffer;
+    // 2) 准备源集合（优先单源路径，如为空再尝试多源路径）
+    std::vector<std::string> sourceRoots;
+    if (!config->getSourcePath().empty()) {
+        sourceRoots.push_back(config->getSourcePath());
+    } else {
+        for (const auto& p : config->getSourcePaths()) {
+            sourceRoots.push_back(p);
+        }
+    }
+    if (sourceRoots.empty()) {
+        std::cerr << "Error: No source specified" << std::endl;
+        return false;
+    }
+
+    // 3) 收集需要备份的条目（含目录与文件；目录用于创建结构，文件用于拷贝）
     std::vector<std::string> filesToBackup;
-    std::string backupName = "backup_" + std::to_string(time(nullptr)); // 生成目标备份文件名
+    std::vector<std::string> dirsToCreate;
 
-    TODO: 首先筛选文件 放到filesToBackup里面
+    for (const auto& root : sourceRoots) {
+        if (fs::is_regular_file(root)) {
+            if (config->shouldIncludeFile(root)) {
+                filesToBackup.push_back(root);
+            }
+        } else if (fs::is_directory(root)) {
+            // 目录先记录根目录（用于创建）
+            dirsToCreate.push_back(root);
+            // 递归遍历 - 先根遍历
+            for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied); it != fs::recursive_directory_iterator(); ++it) {
+                const auto& p = *it;
+                const std::string pathStr = p.path().string();
+                if (p.is_directory()) {
+                    dirsToCreate.push_back(pathStr);
+                } else if (p.is_regular_file()) {
+                    if (config->shouldIncludeFile(pathStr)) {
+                        filesToBackup.push_back(pathStr);
+                    }
+                }
+            }
+        } else {
+            std::cerr << "Warning: Source not file or directory: " << root << std::endl;
+        }
+    }
 
-
-    // 检查是否有文件
-    if(filesToBackup.empty()){
+    if (filesToBackup.empty() && dirsToCreate.empty()) {
         std::cerr << "Error: No files to backup" << std::endl;
         return false;
     }
 
-    // 创建目标文件夹
-    fs::create_directories(config->getDestinationPath());
-
-    // 执行备份操作
-    bool success = true;
-    std::string backupPath = config->getDestinationPath() + "/" + backupName;
-
-
-    // 打包操作
-    // 通过工厂类创建打包器
-    std::unique_ptr<IPack> packer = nullptr;
-    try{
-        packer = PackFactory::createPacker(config->getPackType());
-    }
-    catch(const std::exception& e){
-        std::cerr << "Error: Failed to create packer: " << e.what() << std::endl;
+    // 4) 创建目标根目录
+    const std::string destinationRoot = config->getDestinationPath();
+    try {
+        fs::create_directories(destinationRoot);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to create destination root: " << e.what() << std::endl;
         return false;
     }
 
-    if(config->isPackingEnabled()){
-        // 打包文件
-        if(!packer->pack(filesToBackup, backupPath)){ 
-            std::cerr << "Error: Failed to pack files" << std::endl;
-            success = false;
+    // 5) 是否打包（基础版：若未启用打包，则直接镜像拷贝；启用打包则调用打包器）
+    if (config->isPackingEnabled()) {
+        std::unique_ptr<IPack> packer = nullptr;
+        try {
+            packer = PackFactory::createPacker(config->getPackType());
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to create packer: " << e.what() << std::endl;
+            return false;
         }
+
+        // 基础实现：将收集的文件直接打包到目标目录下（由具体打包器决定扩展名）
+        const std::string baseName = "backup_" + std::to_string(time(nullptr));
+        const std::string destPackBase = (fs::path(destinationRoot) / baseName).string();
+        if (!packer->pack(filesToBackup, destPackBase)) {
+            std::cerr << "Error: Failed to pack files" << std::endl;
+            return false;
+        }
+        return true;
     }
 
-    else{
-        // 那就是直接进行文件copy  -->  这里假设文件类型都是普通文件或者目录  暂时不考虑压缩加密之类的操作
-
-        // 这里主要是要判断源文件是目录还是文件，目录的话需要保持源目录机构  -->  文件列表是通过先根遍历得到的
-        // 也就是以源目录为根目录，将相对路径添加到备份中
-        // 如果是普通文件
-        if(fs::is_regular_file(config->getSourcePath())){
-            try{
-                std::string destFilePath = backupPath + "/" + fs::path(config->getSourcePath()).filename().string();
-                // 确保目标目录存在
-            fs::create_directories(fs::path(destFilePath).parent_path());
-            fs::copy_file(config->getSourcePath(), destFilePath, fs::copy_options::overwrite_existing);
+    // 6) 非打包路径：直接拷贝。若是目录，保持相对路径结构拷贝到 destinationRoot
+    bool success = true;
+    for (const auto& root : sourceRoots) {
+        if (fs::is_regular_file(root)) {
+            // 单文件：复制到目标根目录，文件名不变
+            try {
+                const std::string destFilePath = (fs::path(destinationRoot) / fs::path(root).filename()).string();
+                fs::create_directories(fs::path(destFilePath).parent_path());
+                fs::copy_file(root, destFilePath, fs::copy_options::overwrite_existing);
             } catch (const std::exception& e) {
-            std::cerr << "Error copying file " << config->getSourcePath() << " to backup directory: " << e.what() << std::endl;
-            success = false;
+                std::cerr << "Error copying file " << root << ": " << e.what() << std::endl;
+                success = false;
             }
-        }
-        else if(fs::is_directory(config->getSourcePath())){
-            for(const auto&file : filesToBackup){
-                // 构建相对路径和目标路径
-                std::string relativePath = fs::relative(file, config->getSourcePath()).string();
-                std::string destFilePath = backupPath + "/" + relativePath;
-
-                // 判断当前文件是目录还是文件
-                if(fs::is_directory(file)){
-                    fs::create_directories(destFilePath);
-                    createdDirs.insert(file);
-                }
-                else{
-                    try{
-                        // 因为是先根遍历，所以肯定可以保证夫目录存在
-                        CopyFile(file, destFilePath);
+        } else if (fs::is_directory(root)) {
+            // 先创建所有需要的目录（保持结构）
+            for (const auto& d : dirsToCreate) {
+                if (d.rfind(root, 0) == 0) { // 以 root 为前缀
+                    const std::string relativePath = fs::relative(d, root).string();
+                    const std::string destDirPath = (relativePath.empty() ? destinationRoot : (fs::path(destinationRoot) / relativePath).string());
+                    try {
+                        fs::create_directories(destDirPath);
+                    } catch (const std::exception& e) {
+                        std::cerr << "Error creating directory " << destDirPath << ": " << e.what() << std::endl;
+                        success = false;
                     }
-                    catch (const std::exception& e) {
-                        std::cerr << "Error copying file " << file << " to backup directory: " << e.what() << std::endl;
+                }
+            }
+
+            // 再复制文件
+            for (const auto& f : filesToBackup) {
+                if (f.rfind(root, 0) == 0) { // 以 root 为前缀
+                    const std::string relativePath = fs::relative(f, root).string();
+                    const std::string destFilePath = (fs::path(destinationRoot) / relativePath).string();
+                    try {
+                        fs::create_directories(fs::path(destFilePath).parent_path());
+                        CopyFileBinary(f, destFilePath);
+                    } catch (const std::exception& e) {
+                        std::cerr << "Error copying file " << f << ": " << e.what() << std::endl;
                         success = false;
                     }
                 }

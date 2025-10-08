@@ -8,14 +8,15 @@ add_library(backup_core STATIC ${SOURCES} ${HEADERS})
 # 核心库配置（包含目录、编译选项等）
 target_include_directories(backup_core PUBLIC ../include)
 if(MSVC)
-  target_compile_options(backup_core PRIVATE /W4)
+  target_compile_options(backup_core PRIVATE /W4 /utf-8 /Zc:__cplusplus)
 else()
   target_compile_options(backup_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# 链接JSON库
-target_link_libraries(backup_core PUBLIC nlohmann_json::nlohmann_json)
 
 # 主应用程序（仅包含入口文件main.cpp）
 add_executable(backup_app main.cpp)
 target_link_libraries(backup_app PRIVATE backup_core)  # 链接核心库
+if(MSVC)
+  target_compile_options(backup_app PRIVATE /utf-8 /Zc:__cplusplus)
+endif()

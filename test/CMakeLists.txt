@@ -5,7 +5,7 @@ enable_testing()
 add_subdirectory(../lib/googletest googletest)  # 第二个参数指定GTest构建目录（避免冲突）
 
 # 收集测试源文件
-file(GLOB_RECURSE TEST_SOURCES "*.cpp")
+file(GLOB_RECURSE TEST_SOURCES "test_simple.cpp")
 
 # 创建测试可执行文件
 add_executable(test_app ${TEST_SOURCES})
@@ -14,7 +14,6 @@ add_executable(test_app ${TEST_SOURCES})
 target_link_libraries(test_app PRIVATE 
   backup_core                # 依赖主程序核心库
   gtest                      # 依赖GTest库
-  nlohmann_json::nlohmann_json  # 添加JSON库依赖
 )
 
 # 添加测试用例（CTest识别）

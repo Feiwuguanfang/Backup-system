@@ -1,9 +1,9 @@
 #ifndef PACKFACTORY_H
 #define PACKFACTORY_H
-
+#include "IPack.h"
 #include <string>
 #include <memory>
-#include "IPack.h"
+
 
 // 打包器工厂类 - 负责创建不同类型的打包器实例
 class PackFactory {
