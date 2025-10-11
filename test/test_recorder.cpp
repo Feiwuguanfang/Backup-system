@@ -8,16 +8,16 @@ TEST(RecorderTest, LoadAndSaveBackupRecords){
     std::string testFilePath = "test_backup_records.json";
 
     // 先在recorder里添加几条备份记录
-    BackupEntry entry1 = {"file1.txt", "./file1.txt", "2023-12-01 12:00:00", "backup1"};
-    BackupEntry entry2 = {"file2.txt", "./file2.txt", "2023-12-02 12:00:00", "backup2"};
+    BackupEntry entry1("file1.txt", "./file1.txt", "./backup", "backup1", "2023-12-01 12:00:00", false, false, false);
+    BackupEntry entry2("file2.txt", "./file2.txt", "./backup", "backup2", "2023-12-02 12:00:00", false, false, false);
     recorder.addBackupRecord(entry1);
     recorder.addBackupRecord(entry2);
 
     // 测试保存备份记录
     EXPECT_TRUE(recorder.saveBackupRecordsToFile(testFilePath));
 
-    BackupEntry entry3 = {"file3.txt", "./file3.txt", "2023-12-03 12:00:00", "backup3"};
-    BackupEntry entry4 = {"file4.txt", "./file4.txt", "2023-12-04 12:00:00", "backup4"};
+    BackupEntry entry3("file3.txt", "./file3.txt", "./backup", "backup3", "2023-12-03 12:00:00", false, false, false);
+    BackupEntry entry4("file4.txt", "./file4.txt", "./backup", "backup4", "2023-12-04 12:00:00", false, false, false);
     recorder.addBackupRecord(entry3);
     recorder.addBackupRecord(entry4);
 
@@ -34,12 +34,12 @@ TEST(RecorderTest, LoadAndSaveBackupRecords){
 // 增添功能测试
 TEST(RecorderTest, AddBackupRecord){
     CBackupRecorder recorder;
-    BackupEntry entry1 = {"file1.txt", "./file1.txt", "2023-12-01 12:00:00"};
+    BackupEntry entry1("file1.txt", "./file1.txt", "./backup", "backup1", "2023-12-01 12:00:00", false, false, false);
     recorder.addBackupRecord(entry1);
     EXPECT_EQ(recorder.getBackupRecords().size(), 1);
     EXPECT_EQ(recorder.getBackupRecords()[0], entry1);
 
-    BackupEntry entry2 = {"file2.txt", "./file2.txt", "2023-12-02 12:00:00"};
+    BackupEntry entry2("file2.txt", "./file2.txt", "./backup", "backup2", "2023-12-02 12:00:00", false, false, false);
     recorder.addBackupRecord(entry2);
     EXPECT_EQ(recorder.getBackupRecords().size(), 2);
     EXPECT_EQ(recorder.getBackupRecords()[1], entry2);
@@ -48,13 +48,13 @@ TEST(RecorderTest, AddBackupRecord){
 // 查找功能测试
 TEST(RecorderTest, FindBackupRecord){
     CBackupRecorder recorder;
-    BackupEntry entry1 = {"file1.txt", "./file1.txt", "2023-12-01 12:00:00", "backup1"};
+    BackupEntry entry1("file1.txt", "./file1.txt", "./backup", "backup1", "2023-12-01 12:00:00", false, false, false);
     recorder.addBackupRecord(entry1);
-    BackupEntry entry2 = {"file2.txt", "./file2.txt", "2023-12-02 12:00:00", "backup2"};
+    BackupEntry entry2("file2.txt", "./file2.txt", "./backup", "backup2", "2023-12-02 12:00:00", false, false, false);
     recorder.addBackupRecord(entry2);
-    BackupEntry entry3 = {"file3.txt", "./file3.txt", "2023-12-03 12:00:00", "backup3"};    
+    BackupEntry entry3("file3.txt", "./file3.txt", "./backup", "backup3", "2023-12-03 12:00:00", false, false, false);    
     recorder.addBackupRecord(entry3);
-    BackupEntry entry4 = {"file1.txt", "./file1.txt", "2023-12-04 12:00:00", "backup4"};
+    BackupEntry entry4("file1.txt", "./file1.txt", "./backup", "backup4", "2023-12-04 12:00:00", false, false, false);
     recorder.addBackupRecord(entry4);
 
     // 按名查找
@@ -84,13 +84,13 @@ TEST(RecorderTest, FindBackupRecord){
 // 删除功能测试
 TEST(RecorderTest, DeleteBackupRecord){
     CBackupRecorder recorder;
-    BackupEntry entry1 = {"file1.txt", "./file1.txt", "2023-12-01 12:00:00", "backup1"};
+    BackupEntry entry1("file1.txt", "./file1.txt", "./backup", "backup1", "2023-12-01 12:00:00", false, false, false);
     recorder.addBackupRecord(entry1);
-    BackupEntry entry2 = {"file2.txt", "./file2.txt", "2023-12-02 12:00:00", "backup2"};
+    BackupEntry entry2("file2.txt", "./file2.txt", "./backup", "backup2", "2023-12-02 12:00:00", false, false, false);
     recorder.addBackupRecord(entry2);
-    BackupEntry entry3 = {"file3.txt", "./file3.txt", "2023-12-03 12:00:00", "backup3"};    
+    BackupEntry entry3("file3.txt", "./file3.txt", "./backup", "backup3", "2023-12-03 12:00:00", false, false, false);    
     recorder.addBackupRecord(entry3);
-    BackupEntry entry4 = {"file1.txt", "./file1.txt", "2023-12-04 12:00:00", "backup4"};
+    BackupEntry entry4("file1.txt", "./file1.txt", "./backup", "backup4", "2023-12-04 12:00:00", false, false, false);
     recorder.addBackupRecord(entry4);
 
     // 删除备份记录
@@ -107,17 +107,17 @@ TEST(RecorderTest, DeleteBackupRecord){
 // 修改功能测试
 TEST(RecorderTest, ModifyBackupRecord){
     CBackupRecorder recorder;
-    BackupEntry entry1 = {"file1.txt", "./file1.txt", "2023-12-01 12:00:00", "backup1"};
+    BackupEntry entry1("file1.txt", "./file1.txt", "./backup", "backup1", "2023-12-01 12:00:00", false, false, false);
     recorder.addBackupRecord(entry1);
-    BackupEntry entry2 = {"file2.txt", "./file2.txt", "2023-12-02 12:00:00", "backup2"};
+    BackupEntry entry2("file2.txt", "./file2.txt", "./backup", "backup2", "2023-12-02 12:00:00", false, false, false);
     recorder.addBackupRecord(entry2);
-    BackupEntry entry3 = {"file3.txt", "./file3.txt", "2023-12-03 12:00:00", "backup3"};    
+    BackupEntry entry3("file3.txt", "./file3.txt", "./backup", "backup3", "2023-12-03 12:00:00", false, false, false);    
     recorder.addBackupRecord(entry3);
-    BackupEntry entry4 = {"file1.txt", "./file1.txt", "2023-12-04 12:00:00", "backup4"};
+    BackupEntry entry4("file1.txt", "./file1.txt", "./backup", "backup4", "2023-12-04 12:00:00", false, false, false);
     recorder.addBackupRecord(entry4);
 
     // 修改备份记录
-    BackupEntry modifiedEntry1 = {"file2.txt", "./file2_modified.txt", "2023-12-01 12:00:00", "backup2_modified"};
+    BackupEntry modifiedEntry1("file2.txt", "./file2_modified.txt", "./backup", "backup2_modified", "2023-12-01 12:00:00", false, false, false);
     recorder.modifyBackupRecord(entry2, modifiedEntry1);
     EXPECT_EQ(recorder.findBackupRecordsByFileName("file2.txt").size(), 1);
     EXPECT_EQ(recorder.findBackupRecordsByFileName("file2.txt")[0], modifiedEntry1);

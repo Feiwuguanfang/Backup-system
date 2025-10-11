@@ -1,4 +1,4 @@
-﻿#ifndef CFACTORY_H
+#ifndef CFACTORY_H
 #define CFACTORY_H
 
 #include "ICompress.h"

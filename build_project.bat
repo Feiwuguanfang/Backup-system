@@ -1,11 +1,11 @@
 @echo off
 setlocal
 
-rem 检查build目录是否存在，不存在则创建
+:: Check if build directory exists, create if not
 if not exist "build" mkdir build
 cd build
 
-rem 执行CMake生成项目
+:: Generate project with CMake
 cmake ..
 if %ERRORLEVEL% NEQ 0 (
 echo CMake generate failed, please check the error message
@@ -13,7 +13,7 @@ pause
 exit /b %ERRORLEVEL%
 )
 
-rem 编译项目
+:: Build the project (Debug mode)
 cmake --build . --config Debug
 if %ERRORLEVEL% NEQ 0 (
 echo Compile failed, please check the error messages

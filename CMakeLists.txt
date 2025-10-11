@@ -10,13 +10,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 添加JSON库
 include(FetchContent)
-FetchContent_Declare(
-    json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3  # 指定版本
-)
-FetchContent_MakeAvailable(json)
-
+# FetchContent_Declare(
+#     json
+#     GIT_REPOSITORY https://github.com/nlohmann/json.git
+#     GIT_TAG v3.11.3  # 指定版本
+# )
+# FetchContent_MakeAvailable(json)
+include_directories(${CMAKE_SOURCE_DIR}/third_party/json/include)
 # 静态运行时库配置（全局生效）
 if(MSVC)
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
