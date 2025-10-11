@@ -1,4 +1,4 @@
-﻿#include "CBackupRecorder.h"
+#include "CBackupRecorder.h"
 #include <fstream>
 #include <algorithm>
 #include <iostream>
@@ -40,7 +40,7 @@ bool CBackupRecorder::loadBackupRecordsFromFile(const std::string& filePath){
             std::cerr << "Error: Failed to open file " << filePath << " for reading." << std::endl;
             return false;
         }
-        json j;
+        nlohmann::json j;
         file >> j;
 
         // 将原先的记录清空
@@ -68,7 +68,7 @@ bool CBackupRecorder::saveBackupRecordsToFile(const std::string& filePath){
             std::cerr << "Error: Failed to open file " << filePath << " for writing." << std::endl;
             return false;
         }
-        json j = backupRecords;
+        nlohmann::json j = backupRecords;
         file << j.dump(4); // 4 表示缩进空格数
         file.close();
         return true;
