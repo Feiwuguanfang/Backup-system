@@ -102,18 +102,34 @@ bool CBackup::doRecovery(const BackupEntry& entry) {
     const std::string backupRoot = entry.destDirectory; // 记录中的目标目录（备份落地位置）
     const std::string backupName = entry.backupFileName; // 记录中的备份文件名或相对路径
 
-    if (entry.isPacked) {
+    const fs::path backupPath = fs::path(backupRoot) / backupName;
+
+
+    PackFactory packFactory;
+    if (packFactory.isPackedFile(backupPath.string())) {
         std::cout << "Unpacking file: " << backupName << std::endl;
-        // 实际应根据 pack 类型创建 packer 并调用 unpack(backupRoot/backupName, restoreDir)
-        // 这里的基础实现仅返回失败以提醒未实现
-        // return packer->unpack(...);
-        // 为了可运行，先返回 true（占位）
+        // 创建对应类型打包器
+        std::string packType = packFactory.getPackType(backupRoot + "/" + backupName);
+        if(packType.empty()){
+            std::cerr << "Error: Unknown pack type for file: " << backupName << std::endl;
+            return false;
+        }
+        std::unique_ptr<IPack> packer = nullptr;
+        try {
+            packer = PackFactory::createPacker(packType);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to create packer: " << e.what() << std::endl;
+            return false;
+        }
+        // 解包到源文件目录
+        if (!packer->unpack(backupRoot + "/" + backupName, entry.sourceFullPath)) {
+            std::cerr << "Error: Failed to unpack file: " << backupName << std::endl;
+            return false;
+        }
         return true;
     }
 
     // 非打包：按路径直接复制
-    const fs::path backupPath = fs::path(backupRoot) / backupName;
-
     // 入口记录里 sourceFullPath 是原文件应恢复到的绝对路径
     const fs::path restorePath = fs::path(entry.sourceFullPath);
     try {
@@ -214,7 +230,7 @@ bool CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
         }
 
         // 基础实现：将收集的文件直接打包到目标目录下（由具体打包器决定扩展名）
-        const std::string baseName = "backup_" + std::to_string(time(nullptr));
+        const std::string baseName = "backup_" + std::to_string(time(nullptr)) + "." + config->getPackType();
         const std::string destPackBase = (fs::path(destinationRoot) / baseName).string();
         if (!packer->pack(filesToBackup, destPackBase)) {
             std::cerr << "Error: Failed to pack files" << std::endl;

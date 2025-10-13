@@ -5,6 +5,13 @@
 #include <string>
 #include <vector>
 
+// 打包器类型枚举
+enum class PackType : uint8_t{
+    Basic = 0,
+    Zip = 1,
+    Tar = 2,
+};
+
 // IPack 抽象类 - 文件打包与解包接口
 class IPack {
 public:

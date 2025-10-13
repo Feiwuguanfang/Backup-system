@@ -5,6 +5,7 @@
 
 #include "CBackup.h"
 #include "CConfig.h"
+#include "PackFactory.h"
 
 namespace fs = std::filesystem;
 
@@ -38,7 +39,7 @@ static std::string BACKUP_REPOSITORY_ROOT = "./backup_repository";
 
 static void printHelp(){
     std::cout << "Usage (pseudo CLI):\n"
-              << "--mode backup --src <path> --dst <relative_path> [--include \".*\\.txt\"]\n"
+              << "--mode backup  --src <path> --dst <relative_path> [--include \".*\\.txt\"  --pack <packType>(default: none)]\n"
               << "--mode recover --dst <relative_path> --to <target_path>\n";
 }
 
@@ -108,6 +109,7 @@ static std::vector<std::string> tokenize(const std::string& line){
 
 static int runParsed(const std::vector<std::string>& args){
     std::string mode;
+    std::string packType = "none";  // 新增加一个参数用于指定打包算法,默认不打包
     std::string srcPath;
     std::string dstPath;
     std::string includeRegex;
@@ -118,6 +120,7 @@ static int runParsed(const std::vector<std::string>& args){
     for (size_t i = 0; i < args.size(); ++i) {
         const std::string& arg = args[i];
         if (arg == "--mode") { nextVal(i, mode); }
+        else if (arg == "--pack") { nextVal(i, packType); }
         else if (arg == "--src") { nextVal(i, srcPath); }
         else if (arg == "--dst") { nextVal(i, dstPath); }
         else if (arg == "--include") { nextVal(i, includeRegex); }
@@ -147,6 +150,7 @@ static int runParsed(const std::vector<std::string>& args){
             std::string sourceDirName = fs::path(srcPath).filename().string();
             actualBackupPath = (fs::path(actualBackupPath) / sourceDirName).string();
         }
+
         
         std::cout << "Source: " << srcPath << std::endl;
         std::cout << "Relative path: " << dstPath << std::endl;
@@ -156,6 +160,22 @@ static int runParsed(const std::vector<std::string>& args){
         config->setSourcePath(srcPath)
               .setDestinationPath(actualBackupPath)
               .setRecursiveSearch(true);
+
+        // 判断是否需要打包
+        if(packType != "none"){
+            // 检查指定的打包器类型是否支持
+            if(!PackFactory::isPackTypeSupported(packType)){
+                std::cerr << "Error: Packing algorithm type " << packType << " is not supported.\n";
+                return 1;
+            }
+            else{
+                // 设置打包器类型
+                config->setPackType(packType)
+                        .setPackingEnabled(true);
+            }
+        }
+
+
         if (!includeRegex.empty()) config->addIncludePattern(includeRegex);
         CBackup backup;
         if (!backup.doBackup(config)) { std::cerr << "Backup failed" << std::endl; return 2; }
