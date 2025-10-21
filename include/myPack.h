@@ -26,13 +26,18 @@ struct FileMeta{
  *  4. 文件元信息 : 文件名长度（4字节） 文件名(变长) 文件大小（8字节） 偏移量（8字节）
  *  5. 文件内容（按顺序排列）
 */
-
+//  haed + content   -->  文件夹结构（先根遍历） -->  root + 文件名
+// 获得path  -->  判断类型  --> 目录文件 -->  文件遍历  -->  |  文件list   -->  下游操作  
 
 class myPack : public IPack {
 public:
-    bool myPack::pack(const std::vector<std::string>& files, const std::string& destPath) override;
+    std::string myPack::pack(const std::vector<std::string>& files, const std::string& destPath) override;
 
     bool myPack::unpack(const std::string& srcPath, const std::string& destDir) override;
+
+    PackType getPackType() const override { return PackType::Basic; }
+
+    std::string getPackTypeName() const override { return "Basic"; }
 };
 
 

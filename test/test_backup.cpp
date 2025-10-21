@@ -8,39 +8,8 @@
 #include <filesystem>
 #include <memory>
 #include <vector>
+#include "testUtils.h"
 
-// 声明外部函数
-bool ReadFile(const std::string& filePath, std::vector<char>& buffer);
-
-// 辅助函数定义必须放在测试用例之前
-bool CreateTestFile(const std::string& filePath, const std::string& content) {
-    try {
-        // 确保目录存在
-        std::filesystem::path dir = std::filesystem::path(filePath).parent_path();
-        if (!dir.empty() && !std::filesystem::exists(dir)) {
-            std::filesystem::create_directories(dir);
-        }
-        
-        // 创建并写入文件
-        std::ofstream file(filePath, std::ios::binary);
-        if (!file) return false;
-        file.write(content.data(), content.size());
-        file.close();
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-void CleanupTestFile(const std::string& filePath) {
-    try {
-        if (std::filesystem::exists(filePath)) {
-            std::filesystem::remove(filePath);
-        }
-    } catch (...) {
-        // 忽略清理错误
-    }
-}
 
 TEST(BackupTest, BasicBackup) {  
     // 测试准备：创建测试文件
@@ -71,8 +40,8 @@ TEST(BackupTest, BasicBackup) {
     
     // 检查备份文件内容是否与源文件相同
     std::vector<char> sourceBuffer, backupBuffer;
-    bool readSource = ReadFile(sourcePath, sourceBuffer);
-    bool readBackup = ReadFile(destPath, backupBuffer);
+    bool readSource = ReadTestFile(sourcePath, sourceBuffer);
+    bool readBackup = ReadTestFile(destPath, backupBuffer);
     EXPECT_TRUE(readSource) << "Failed to read source file";
     EXPECT_TRUE(readBackup) << "Failed to read backup file";
     EXPECT_EQ(sourceBuffer, backupBuffer) << "Backup content mismatch";

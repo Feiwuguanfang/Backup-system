@@ -66,6 +66,7 @@ inline bool operator==(const BackupEntry& lhs, const BackupEntry& rhs) {
 class CBackupRecorder {
 public:
     CBackupRecorder();
+    CBackupRecorder(bool autoSave);
     CBackupRecorder(const std::string& filePath);
     ~CBackupRecorder();
 
@@ -104,9 +105,13 @@ public:
 
     bool modifyBackupRecord(const BackupEntry& oldEntry, const BackupEntry& newEntry);
 
+    // 获取默认的备份记录文件路径
+    std::string getRecorderFilePath() const;
+
 private:
     std::vector<BackupEntry> backupRecords; // 备份记录容器
     std::string recorderFilePath; // 备份记录文件路径
+    bool autoSaveEnabled; // 是否自动保存,默认为false
 };
 
 #endif

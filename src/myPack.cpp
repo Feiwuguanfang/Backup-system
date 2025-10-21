@@ -1,6 +1,6 @@
 # include "myPack.h"
 
-bool myPack::pack(const std::vector<std::string>& files, const std::string& destPath) {
+std::string myPack::pack(const std::vector<std::string>& files, const std::string& destPath) {
     std::vector<FileMeta> metas;
     // 包头长度 = 是否打包（1字节） + 算法类型(1字节) + 文件数量(4字节)
     size_t headerLen = 1 + 1 + 4;
@@ -23,7 +23,7 @@ bool myPack::pack(const std::vector<std::string>& files, const std::string& dest
         // 尝试读取文件，判断文件是否存在
         if(!std::filesystem::exists(file)){
             std::cerr << "Error: File " << file << " does not exist.\n";
-            return false;
+            return "";
         }
 
         uint64_t size = std::filesystem::file_size(file);
@@ -33,11 +33,14 @@ bool myPack::pack(const std::vector<std::string>& files, const std::string& dest
         currentOffset += size;
     }
 
+    const std::string baseName = "backup_" + std::to_string(time(nullptr)) + "." + getPackTypeName();
+    const std::string destPackBase = (std::filesystem::path(destPath) / baseName).string();
+
     // 接下来写入包头（包括打包算法，当前包包含的文件数量，文件的元信息）
-    std::ofstream out(destPath, std::ios::binary);
+    std::ofstream out(destPackBase, std::ios::binary);
     if(!out){
-        std::cerr << "Error: Failed to open file " << destPath << " for writing.\n";
-        return false;
+        std::cerr << "Error: Failed to open file " << destPackBase << " for writing.\n";
+        return "";
     }
     // 写入是否打包（1字节）
     uint8_t isPacked = 1;
@@ -64,7 +67,7 @@ bool myPack::pack(const std::vector<std::string>& files, const std::string& dest
         std::ifstream in(meta.name, std::ios::binary);
         if(!in){
             std::cerr << "Error: Failed to open file " << meta.name << " for reading.\n";
-            return false;
+            return "";
         }
         std::vector<char> buffer(meta.size);
         in.read(buffer.data(), meta.size);
@@ -72,8 +75,8 @@ bool myPack::pack(const std::vector<std::string>& files, const std::string& dest
     }
 
     out.close();
-    std::cout << "Packing " << files.size() << " files to " << destPath << " using BasicPacker.\n";
-    return true;
+    std::cout << "Packing " << files.size() << " files to " << destPackBase << " using " << getPackTypeName() << "Packer.\n";
+    return destPackBase;
 }
 
 bool myPack::unpack(const std::string& srcPath, const std::string& destDir) {

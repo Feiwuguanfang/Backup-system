@@ -2,8 +2,8 @@
 #include <string>
 #include <fstream>
 #include <iostream>
-#include "IPack.h"       // 假设IPack类定义在该头文件
-#include "PackFactory.h"  // 假设PackFactory类定义在该头文件
+#include "PackFactory.h"  
+#include "CompressFactory.h"
 #include "CBackup.h"
 #include "CBackupRecorder.h"
 // 在CBackup.cpp的顶部添加
@@ -100,13 +100,55 @@ bool CBackup::doRecovery(const BackupEntry& entry) {
     // - 若非打包：从备份目录将文件按原始相对路径复制回去
 
     const std::string backupRoot = entry.destDirectory; // 记录中的目标目录（备份落地位置）
-    const std::string backupName = entry.backupFileName; // 记录中的备份文件名或相对路径
+    std::string backupName = entry.backupFileName; // 记录中的备份文件名或相对路径
 
-    const fs::path backupPath = fs::path(backupRoot) / backupName;
+    const fs::path backupPath = fs::path(backupRoot) / backupName;  
+    // 删除的话保留最初的备份文件，形成的中间文件都被删掉
+    bool isDecrypted = false;
+    bool isDecompressed = false;
+
+    // 先解密
+
+    // 再解压缩
+    CompressFactory compressFactory;
+    if(compressFactory.isCompressedFile(backupRoot + "/" + backupName)){
+        std::cout << "Decompressing file:" << backupName << std::endl;
+        // 创建对应类型打包器
+        std::string decompressType = compressFactory.getCompressType(backupRoot + "/" + backupName);
+        if(decompressType.empty()){
+            std::cerr << "Error: Unknown compress type for file: " << backupName << std::endl;
+            return false;
+        }
+        std::unique_ptr<ICompress> decompressor = nullptr;
+        try {
+            decompressor = compressFactory.createCompress(decompressType);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to create decompressor: " << e.what() << std::endl;
+            return false;
+        }
+        // 解压缩到备份目录
+        // 这里是懒得改了
+        std::string sourcePath = backupRoot + "/" + backupName;
+        // 将后缀去除
+        backupName = backupName.substr(0, backupName.find_last_of('.'));
+        if (!decompressor->decompressFile(sourcePath, backupRoot + "/" + backupName)) {
+            std::cerr << "Error: Failed to decompress file: " << backupName << std::endl;
+            return false;
+        }
+        // 解压完成了，如果之前有解密过，那就删除解密后的文件
+        if(isDecrypted){
+            if(!fs::remove(sourcePath)){
+                std::cerr << "Error: Failed to remove compressed file: " << sourcePath << std::endl;
+                return false;
+            }
+        }
+        isDecompressed = true;
+    }
 
 
+    // 最后解包
     PackFactory packFactory;
-    if (packFactory.isPackedFile(backupPath.string())) {
+    if (packFactory.isPackedFile(backupRoot + "/" + backupName)) {
         std::cout << "Unpacking file: " << backupName << std::endl;
         // 创建对应类型打包器
         std::string packType = packFactory.getPackType(backupRoot + "/" + backupName);
@@ -125,6 +167,13 @@ bool CBackup::doRecovery(const BackupEntry& entry) {
         if (!packer->unpack(backupRoot + "/" + backupName, entry.sourceFullPath)) {
             std::cerr << "Error: Failed to unpack file: " << backupName << std::endl;
             return false;
+        }
+        // 解包完成了，如果之前有解密过或者压缩过，那就删除解密后的文件或者压缩后的文件
+        if(isDecompressed || isDecrypted){
+            if(!fs::remove(backupRoot + "/" + backupName)){
+                std::cerr << "Error: Failed to remove packed file: " << backupRoot + "/" + backupName << std::endl;
+                return false;
+            }
         }
         return true;
     }
@@ -230,12 +279,42 @@ bool CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
         }
 
         // 基础实现：将收集的文件直接打包到目标目录下（由具体打包器决定扩展名）
-        const std::string baseName = "backup_" + std::to_string(time(nullptr)) + "." + config->getPackType();
-        const std::string destPackBase = (fs::path(destinationRoot) / baseName).string();
-        if (!packer->pack(filesToBackup, destPackBase)) {
+        // 调用打包器打包文件
+        const std::string packedFilePath = packer->pack(filesToBackup, destinationRoot);
+        if (packedFilePath.empty()) {
             std::cerr << "Error: Failed to pack files" << std::endl;
             return false;
         }
+
+        // 5.1)  打包完判断是否需要压缩
+        if(config->isCompressionEnabled()){
+            std::unique_ptr<ICompress> compress = nullptr;
+            try{
+                compress = CompressFactory::createCompress(config->getCompressionType());
+            } catch (const std::exception& e) {
+                std::cerr << "Error: Failed to create compress: " << e.what() << std::endl;
+                return false;
+            }
+            // 这个路径需要斟酌一下，或许增加一个后缀，总之是要将之前的文件给覆盖了
+            const std::string compressedFilePath = compress->compressFile(packedFilePath);
+            if(compressedFilePath.empty()){
+                std::cerr << "Error: Failed to compress file" << std::endl;
+                return false;
+            }
+            // 要是压缩成功的话就把之前的文件删掉
+            if(fs::exists(compressedFilePath)){
+                try{
+                    fs::remove(packedFilePath);
+                } catch (const std::exception& e) {
+                    std::cerr << "Error: Failed to remove packed file: " << e.what() << std::endl;
+                    return false;
+                }
+            }
+        }
+
+        // TODO: 记录备份信息
+
+
         return true;
     }
 
