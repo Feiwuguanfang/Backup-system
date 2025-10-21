@@ -16,6 +16,22 @@ CBackupRecorder::CBackupRecorder()
         createFile.close();
     }
     loadBackupRecordsFromFile(recorderFilePath);
+    autoSaveEnabled = false;
+}
+
+CBackupRecorder::CBackupRecorder(bool autoSave)
+{
+    // 设定默认备份记录文件路径
+    recorderFilePath = "backup_records.json";
+    // 先检查有没有这个文件
+    std::ifstream checkFile(recorderFilePath);
+    if(!checkFile.is_open()){
+        // 如果文件不存在，创建一个空文件
+        std::ofstream createFile(recorderFilePath);
+        createFile.close();
+    }
+    loadBackupRecordsFromFile(recorderFilePath);
+    autoSaveEnabled = autoSave;
 }
 
 // 构造函数
@@ -27,7 +43,9 @@ CBackupRecorder::CBackupRecorder(const std::string& filePath)
 
 CBackupRecorder::~CBackupRecorder()
 {
-    saveBackupRecordsToFile(recorderFilePath);
+    if(autoSaveEnabled){
+        saveBackupRecordsToFile(recorderFilePath);
+    }
 }
 
 
@@ -156,4 +174,8 @@ bool CBackupRecorder::modifyBackupRecord(const BackupEntry& oldEntry, const Back
     }
     std::cerr << "Error: Backup record not found for modification." << std::endl;
     return false;
+}
+
+std::string CBackupRecorder::getRecorderFilePath() const{
+    return recorderFilePath;
 }

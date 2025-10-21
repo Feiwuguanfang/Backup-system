@@ -1,9 +1,15 @@
 ﻿#include <gtest/gtest.h>
 #include <string>
 #include "CBackupRecorder.h"
+#include "testUtils.h"
+
+std::string defaultPath = "backup_records.json";
 
 // 载入和保存功能测试
 TEST(RecorderTest, LoadAndSaveBackupRecords){  
+    // 清理之前的文件
+    CleanupTestFile(defaultPath);
+
     CBackupRecorder recorder;
     std::string testFilePath = "test_backup_records.json";
 
@@ -29,11 +35,17 @@ TEST(RecorderTest, LoadAndSaveBackupRecords){
     EXPECT_EQ(recorder.getBackupRecords()[0], entry1);
     EXPECT_EQ(recorder.getBackupRecords()[1], entry2);
 
+    // 清理测试文件
+    CleanupTestFile(testFilePath);
 }
 
 // 增添功能测试
 TEST(RecorderTest, AddBackupRecord){
+    // 清理之前的文件
+    CleanupTestFile(defaultPath);
+
     CBackupRecorder recorder;
+
     BackupEntry entry1("file1.txt", "./file1.txt", "./backup", "backup1", "2023-12-01 12:00:00", false, false, false);
     recorder.addBackupRecord(entry1);
     EXPECT_EQ(recorder.getBackupRecords().size(), 1);
@@ -43,11 +55,16 @@ TEST(RecorderTest, AddBackupRecord){
     recorder.addBackupRecord(entry2);
     EXPECT_EQ(recorder.getBackupRecords().size(), 2);
     EXPECT_EQ(recorder.getBackupRecords()[1], entry2);
+
 }
 
 // 查找功能测试
 TEST(RecorderTest, FindBackupRecord){
+    // 清理之前的文件
+    CleanupTestFile(defaultPath);
+
     CBackupRecorder recorder;
+
     BackupEntry entry1("file1.txt", "./file1.txt", "./backup", "backup1", "2023-12-01 12:00:00", false, false, false);
     recorder.addBackupRecord(entry1);
     BackupEntry entry2("file2.txt", "./file2.txt", "./backup", "backup2", "2023-12-02 12:00:00", false, false, false);
@@ -79,11 +96,16 @@ TEST(RecorderTest, FindBackupRecord){
     if (!timeResults3.empty()) {
         EXPECT_EQ(timeResults3[0], entry1);
     }
+
 }
 
 // 删除功能测试
 TEST(RecorderTest, DeleteBackupRecord){
+    // 清理之前的文件
+    CleanupTestFile(defaultPath);
+
     CBackupRecorder recorder;
+
     BackupEntry entry1("file1.txt", "./file1.txt", "./backup", "backup1", "2023-12-01 12:00:00", false, false, false);
     recorder.addBackupRecord(entry1);
     BackupEntry entry2("file2.txt", "./file2.txt", "./backup", "backup2", "2023-12-02 12:00:00", false, false, false);
@@ -101,12 +123,15 @@ TEST(RecorderTest, DeleteBackupRecord){
 
     // 检查是否删除了正确的记录
     EXPECT_EQ(recorder.findBackupRecordsByBackupTime("2023-12-01 00:00:00", "2023-12-01 23:59:59").size(), 0);
+
 }
 
 
 // 修改功能测试
-TEST(RecorderTest, ModifyBackupRecord){
+TEST(RecorderTest, ModifyBackupRecord){// 清理之前的文件
+    CleanupTestFile(defaultPath);
     CBackupRecorder recorder;
+
     BackupEntry entry1("file1.txt", "./file1.txt", "./backup", "backup1", "2023-12-01 12:00:00", false, false, false);
     recorder.addBackupRecord(entry1);
     BackupEntry entry2("file2.txt", "./file2.txt", "./backup", "backup2", "2023-12-02 12:00:00", false, false, false);

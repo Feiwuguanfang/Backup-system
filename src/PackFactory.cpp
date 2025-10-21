@@ -2,6 +2,9 @@
 
 
 std::unique_ptr<IPack> PackFactory::createPacker(const std::string& packType){
+    if(!isPackTypeSupported(packType)){
+        throw std::runtime_error("Unknown pack type: " + packType);
+    }
     if(packType == "Basic"){
         return std::make_unique<myPack>();
     }
@@ -46,6 +49,6 @@ bool PackFactory::isPackedFile(const std::string& filePath) {
     }
     uint8_t firstByte;
     in.read(reinterpret_cast<char*>(&firstByte), sizeof(firstByte));
-    return firstByte == 0x01;
+    return firstByte == 0x01 && getPackType(filePath) != "";
 }
 
