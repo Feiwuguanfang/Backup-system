@@ -1,4 +1,4 @@
-#include <vector>
+﻿#include <vector>
 #include <string>
 #include <fstream>
 #include <iostream>
@@ -92,9 +92,51 @@ bool CopyFileBinary(const std::string& srcPath, const std::string& destPath){
     return true;
 }
 
+// 收集需要备份的文件列表
+std::vector<std::string> collectFilesToBackup(const std::string& rootPath, const std::shared_ptr<CConfig>& config) {
+    std::vector<std::string> filesList;
+    
+    // 检查配置是否有效
+    if (!config || !fs::exists(rootPath)) {
+        return filesList;
+    }
+    
+    // 先根遍历：先添加当前路径
+    filesList.push_back(rootPath);
+    
+    // 如果是目录，递归遍历其子目录和文件
+    if (fs::is_directory(rootPath)) {
+        // 根据配置决定是否递归遍历
+        if (config->isRecursiveSearch()) {
+            // 递归遍历目录（先根遍历）
+            for (auto it = fs::directory_iterator(rootPath, 
+                    fs::directory_options::skip_permission_denied); 
+                 it != fs::directory_iterator(); ++it) {
+                const auto& p = *it;
+                const std::string pathStr = p.path().string();
+                
+                // 递归调用，继续先根遍历
+                std::vector<std::string> subFiles = collectFilesToBackup(pathStr, config);
+                filesList.insert(filesList.end(), subFiles.begin(), subFiles.end());
+            }
+        } else {
+            // 非递归遍历，只添加当前目录下的直接子项
+            for (auto it = fs::directory_iterator(rootPath, 
+                    fs::directory_options::skip_permission_denied); 
+                 it != fs::directory_iterator(); ++it) {
+                const auto& p = *it;
+                const std::string pathStr = p.path().string();
+                
+                filesList.push_back(pathStr);
+            }
+        }
+    }
+    
+    return filesList;
+}
 
 
-bool CBackup::doRecovery(const BackupEntry& entry) {
+bool CBackup::doRecovery(const BackupEntry& entry, const std::string& destDir) {
     // 基础恢复：
     // - 若是打包：调用解包器（此处保留输出提示，具体实现按打包器完成）
     // - 若非打包：从备份目录将文件按原始相对路径复制回去
@@ -164,7 +206,7 @@ bool CBackup::doRecovery(const BackupEntry& entry) {
             return false;
         }
         // 解包到源文件目录
-        if (!packer->unpack(backupRoot + "/" + backupName, entry.sourceFullPath)) {
+        if (!packer->unpack(backupRoot + "/" + backupName, destDir)) {
             std::cerr << "Error: Failed to unpack file: " << backupName << std::endl;
             return false;
         }
@@ -180,7 +222,8 @@ bool CBackup::doRecovery(const BackupEntry& entry) {
 
     // 非打包：按路径直接复制
     // 入口记录里 sourceFullPath 是原文件应恢复到的绝对路径
-    const fs::path restorePath = fs::path(entry.sourceFullPath);
+    // 这里改为恢复到 destDir 下的相对路径
+    const fs::path restorePath = fs::path(destDir) / entry.sourceFullPath.substr(entry.sourceFullPath.find_last_of('/') + 1);
     try {
         fs::create_directories(restorePath.parent_path());
     } catch (const std::exception& e) {
@@ -204,11 +247,11 @@ bool CBackup::doRecovery(const BackupEntry& entry) {
 }
 
 
-bool CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
+std::string CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
     // 1) 基础校验
     if (!config || !config->isValid()) {
         std::cerr << "Error: Invalid backup configuration" << std::endl;
-        return false;
+        return "";
     }
 
     // 2) 准备源集合（优先单源路径，如为空再尝试多源路径）
@@ -222,41 +265,20 @@ bool CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
     }
     if (sourceRoots.empty()) {
         std::cerr << "Error: No source specified" << std::endl;
-        return false;
+        return "";
     }
 
     // 3) 收集需要备份的条目（含目录与文件；目录用于创建结构，文件用于拷贝）
     std::vector<std::string> filesToBackup;
-    std::vector<std::string> dirsToCreate;
+    std::string destPath;
 
-    for (const auto& root : sourceRoots) {
-        if (fs::is_regular_file(root)) {
-            if (config->shouldIncludeFile(root)) {
-                filesToBackup.push_back(root);
-            }
-        } else if (fs::is_directory(root)) {
-            // 目录先记录根目录（用于创建）
-            dirsToCreate.push_back(root);
-            // 递归遍历 - 先根遍历
-            for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied); it != fs::recursive_directory_iterator(); ++it) {
-                const auto& p = *it;
-                const std::string pathStr = p.path().string();
-                if (p.is_directory()) {
-                    dirsToCreate.push_back(pathStr);
-                } else if (p.is_regular_file()) {
-                    if (config->shouldIncludeFile(pathStr)) {
-                        filesToBackup.push_back(pathStr);
-                    }
-                }
-            }
-        } else {
-            std::cerr << "Warning: Source not file or directory: " << root << std::endl;
-        }
-    }
+    // 理论上只需要设计一个源就好，这个是之前的设计漏洞，后面改进一下
+    // TODO
+    filesToBackup = collectFilesToBackup(sourceRoots[0], config);
 
-    if (filesToBackup.empty() && dirsToCreate.empty()) {
+    if (filesToBackup.empty()) {
         std::cerr << "Error: No files to backup" << std::endl;
-        return false;
+        return "";
     }
 
     // 4) 创建目标根目录
@@ -265,7 +287,7 @@ bool CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
         fs::create_directories(destinationRoot);
     } catch (const std::exception& e) {
         std::cerr << "Error: Failed to create destination root: " << e.what() << std::endl;
-        return false;
+        return "";
     }
 
     // 5) 是否打包（基础版：若未启用打包，则直接镜像拷贝；启用打包则调用打包器）
@@ -275,15 +297,16 @@ bool CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
             packer = PackFactory::createPacker(config->getPackType());
         } catch (const std::exception& e) {
             std::cerr << "Error: Failed to create packer: " << e.what() << std::endl;
-            return false;
+            return "";
         }
 
         // 基础实现：将收集的文件直接打包到目标目录下（由具体打包器决定扩展名）
         // 调用打包器打包文件
         const std::string packedFilePath = packer->pack(filesToBackup, destinationRoot);
+        destPath = packedFilePath;
         if (packedFilePath.empty()) {
             std::cerr << "Error: Failed to pack files" << std::endl;
-            return false;
+            return "";
         }
 
         // 5.1)  打包完判断是否需要压缩
@@ -293,13 +316,14 @@ bool CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
                 compress = CompressFactory::createCompress(config->getCompressionType());
             } catch (const std::exception& e) {
                 std::cerr << "Error: Failed to create compress: " << e.what() << std::endl;
-                return false;
+                return "";
             }
             // 这个路径需要斟酌一下，或许增加一个后缀，总之是要将之前的文件给覆盖了
             const std::string compressedFilePath = compress->compressFile(packedFilePath);
+            destPath = compressedFilePath;
             if(compressedFilePath.empty()){
                 std::cerr << "Error: Failed to compress file" << std::endl;
-                return false;
+                return "";
             }
             // 要是压缩成功的话就把之前的文件删掉
             if(fs::exists(compressedFilePath)){
@@ -307,61 +331,52 @@ bool CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
                     fs::remove(packedFilePath);
                 } catch (const std::exception& e) {
                     std::cerr << "Error: Failed to remove packed file: " << e.what() << std::endl;
-                    return false;
+                    return "";
                 }
             }
         }
 
         // TODO: 记录备份信息
-
-
-        return true;
+        return destPath;
     }
 
     // 6) 非打包路径：直接拷贝。若是目录，保持相对路径结构拷贝到 destinationRoot
-    bool success = true;
-    for (const auto& root : sourceRoots) {
-        if (fs::is_regular_file(root)) {
-            // 单文件：复制到目标根目录，文件名不变
-            try {
-                const std::string destFilePath = (fs::path(destinationRoot) / fs::path(root).filename()).string();
-                fs::create_directories(fs::path(destFilePath).parent_path());
-                fs::copy_file(root, destFilePath, fs::copy_options::overwrite_existing);
-            } catch (const std::exception& e) {
-                std::cerr << "Error copying file " << root << ": " << e.what() << std::endl;
-                success = false;
-            }
-        } else if (fs::is_directory(root)) {
-            // 先创建所有需要的目录（保持结构）
-            for (const auto& d : dirsToCreate) {
-                if (d.rfind(root, 0) == 0) { // 以 root 为前缀
-                    const std::string relativePath = fs::relative(d, root).string();
-                    const std::string destDirPath = (relativePath.empty() ? destinationRoot : (fs::path(destinationRoot) / relativePath).string());
-                    try {
-                        fs::create_directories(destDirPath);
-                    } catch (const std::exception& e) {
-                        std::cerr << "Error creating directory " << destDirPath << ": " << e.what() << std::endl;
-                        success = false;
-                    }
-                }
-            }
+    destPath = destinationRoot;
+    for(const auto& root : sourceRoots){
+        const fs::path rootPath = fs::path(root).parent_path();
+        if (fs::exists(root)) {
+            // 遍历所有收集的条目
+            for (const auto& entry : filesToBackup) {
+                // 只处理以当前root为前缀的条目
+                if (entry.rfind(rootPath.string(), 0) == 0) {
+                    const std::string relativePath = fs::relative(entry, rootPath).string();
+                    // 为空，说明相对路径就是当前目录，直接以entry作为相对路径
+                    const std::string destinationPath = (relativePath.empty() ? 
+                                                        (fs::path(destinationRoot) / entry).string() : 
+                                                        (fs::path(destinationRoot) / relativePath).string());
+                    
+                    std::cout << "Copying " << entry << " to " << destinationPath << std::endl;
+                    std::cout << "Root:" << rootPath << std::endl;
+                    std::cout << "Relative Path:" << relativePath << std::endl;
 
-            // 再复制文件
-            for (const auto& f : filesToBackup) {
-                if (f.rfind(root, 0) == 0) { // 以 root 为前缀
-                    const std::string relativePath = fs::relative(f, root).string();
-                    const std::string destFilePath = (fs::path(destinationRoot) / relativePath).string();
                     try {
-                        fs::create_directories(fs::path(destFilePath).parent_path());
-                        CopyFileBinary(f, destFilePath);
+                        if (fs::is_directory(entry)) {
+                            // 确保目录存在
+                            fs::create_directories(destinationPath);
+                        } else if (fs::is_regular_file(entry)) {
+                            // 确保目标文件的父目录存在
+                            fs::create_directories(fs::path(destinationPath).parent_path());
+                            // 复制文件
+                            CopyFileBinary(entry, destinationPath);
+                        }
                     } catch (const std::exception& e) {
-                        std::cerr << "Error copying file " << f << ": " << e.what() << std::endl;
-                        success = false;
+                        std::cerr << "Error processing " << entry << ": " << e.what() << std::endl;
+                        return "";
                     }
                 }
             }
         }
     }
 
-    return success;
+    return destPath;
 }

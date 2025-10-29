@@ -9,6 +9,7 @@
 #include "CConfig.h"
 #include "CBackupRecorder.h"
 
+
 class CBackup {
 public: 
     CBackup();
@@ -16,10 +17,11 @@ public:
 
     // 拓展接口
     // 备份相关
-    bool doBackup(const std::shared_ptr<CConfig>& config);
+    std::string doBackup(const std::shared_ptr<CConfig>& config);
 
     // 恢复相关
-    bool doRecovery(const BackupEntry& entry);
+    bool doRecovery(const BackupEntry& entry, const std::string& destDir);
+
 
 private:
     std::set<std::string> createdDirs;  // 用于记录已创建的目录，避免重复创建
@@ -31,5 +33,8 @@ bool ReadFile(const std::string& filePath, std::vector<char>& buffer);
 bool WriteFile(const std::string& filePath, std::vector<char>& buffer);
 // 避免与 Windows API 宏 CopyFile 冲突
 bool CopyFileBinary(const std::string& srcPath, const std::string& destPath);
+// 新增：收集需要备份的文件列表
+std::vector<std::string> collectFilesToBackup(const std::string& rootPath, const std::shared_ptr<CConfig>& config);
+
 
 #endif //CBACKUP_H

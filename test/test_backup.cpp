@@ -1,7 +1,6 @@
 ﻿#include <gtest/gtest.h>
 
 #include "CBackup.h"
-#include "CBackupManager.h"
 #include "CConfig.h"
 
 #include <fstream>
@@ -12,7 +11,7 @@
 
 
 TEST(BackupTest, BasicBackup) {  
-    // 测试准备：创建测试文件
+    // 测试准备：创建测试文件s
     const std::string sourcePath = "test_file.txt";
     const std::string destDir = "test_dir";
     const std::string destPath = destDir + "/test_file.txt";
@@ -30,8 +29,8 @@ TEST(BackupTest, BasicBackup) {
     auto config = std::make_shared<CConfig>(sourcePath, destDir);
     
     CBackup backup;
-    bool result = backup.doBackup(config);
-    EXPECT_TRUE(result) << "Backup failed";
+    std::string result = backup.doBackup(config);
+    EXPECT_TRUE(result.empty()) << "Backup failed: " << result;
 
     // 检查备份文件是否存在
     std::ifstream backupFile(destPath);
@@ -46,11 +45,6 @@ TEST(BackupTest, BasicBackup) {
     EXPECT_TRUE(readBackup) << "Failed to read backup file";
     EXPECT_EQ(sourceBuffer, backupBuffer) << "Backup content mismatch";
 
-    // 测试记录 - 需要通过CBackupManager来获取记录
-    CBackupManager manager;
-    const std::vector<BackupEntry>& records = manager.getBackupRecords();
-    // 注意：由于我们直接使用CBackup，没有通过CBackupManager，所以这里可能没有记录
-    // 这是测试设计的问题，需要重新设计测试逻辑
 
     // 测试清理
     CleanupTestFile(sourcePath);

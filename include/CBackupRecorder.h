@@ -5,6 +5,8 @@
 #include <vector>
 #include <nlohmann/json.hpp>
 
+#include "CConfig.h"
+
 // 定义结构体，用于记录备份记录
 struct BackupEntry {
     std::string fileName;        // 源文件名
@@ -107,6 +109,9 @@ public:
 
     // 获取默认的备份记录文件路径
     std::string getRecorderFilePath() const;
+
+    // 增加备份记录
+    void addBackupRecord(const std::shared_ptr<CConfig>& config, const std::string& destPath);
 
 private:
     std::vector<BackupEntry> backupRecords; // 备份记录容器
