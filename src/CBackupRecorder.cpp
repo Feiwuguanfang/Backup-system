@@ -1,50 +1,59 @@
-#include "CBackupRecorder.h"
+﻿#include "CBackupRecorder.h"
 #include <fstream>
 #include <algorithm>
 #include <iostream>
 
+using namespace std;
+namespace fs = std::filesystem; 
 
 CBackupRecorder::CBackupRecorder()
 {
     // 设定默认备份记录文件路径
-    recorderFilePath = "backup_records.json";
+    CBackupRecorder::recorderFilePath = "backup_records.json";
     // 先检查有没有这个文件
-    std::ifstream checkFile(recorderFilePath);
+    std::ifstream checkFile(CBackupRecorder::recorderFilePath);
     if(!checkFile.is_open()){
         // 如果文件不存在，创建一个空文件
-        std::ofstream createFile(recorderFilePath);
+        std::ofstream createFile(CBackupRecorder::recorderFilePath);
         createFile.close();
     }
-    loadBackupRecordsFromFile(recorderFilePath);
+    loadBackupRecordsFromFile(CBackupRecorder::recorderFilePath);
     autoSaveEnabled = false;
 }
 
 CBackupRecorder::CBackupRecorder(bool autoSave)
 {
     // 设定默认备份记录文件路径
-    recorderFilePath = "backup_records.json";
+    CBackupRecorder::recorderFilePath = "backup_records.json";
     // 先检查有没有这个文件
-    std::ifstream checkFile(recorderFilePath);
+    std::ifstream checkFile(CBackupRecorder::recorderFilePath);
     if(!checkFile.is_open()){
         // 如果文件不存在，创建一个空文件
-        std::ofstream createFile(recorderFilePath);
+        std::ofstream createFile(CBackupRecorder::recorderFilePath);
         createFile.close();
     }
-    loadBackupRecordsFromFile(recorderFilePath);
+    loadBackupRecordsFromFile(CBackupRecorder::recorderFilePath);
     autoSaveEnabled = autoSave;
 }
 
 // 构造函数
 CBackupRecorder::CBackupRecorder(const std::string& filePath)
 {
-    recorderFilePath = filePath;
+    // 检查这个路径是文件还是目录
+    // 如果是文件，直接赋值
+    CBackupRecorder::recorderFilePath = filePath;
+    // 是目录，则将默认文件名加在目录后面
+    // 调用的时候应该还没创建，直接看路径最后有没有json后缀
+    if(filePath.find(".json") == std::string::npos){
+        CBackupRecorder::recorderFilePath = filePath + "/" + "backup_records.json";
+    }
     loadBackupRecordsFromFile(recorderFilePath);
 }
 
 CBackupRecorder::~CBackupRecorder()
 {
     if(autoSaveEnabled){
-        saveBackupRecordsToFile(recorderFilePath);
+        saveBackupRecordsToFile(CBackupRecorder::recorderFilePath);
     }
 }
 
@@ -179,3 +188,38 @@ bool CBackupRecorder::modifyBackupRecord(const BackupEntry& oldEntry, const Back
 std::string CBackupRecorder::getRecorderFilePath() const{
     return recorderFilePath;
 }
+
+void CBackupRecorder::addBackupRecord(const std::shared_ptr<CConfig>& config, const std::string& destPath){
+    BackupEntry entry;
+    // 之前已经将配置中的路径转换为了绝对路径
+    std::string sourcePath = config->getSourcePath();
+    // 文件名就是绝对路径的文件名
+    std::string fileName = fs::path(sourcePath).filename().string();
+    // 完整的目标路径
+    std::string destDir = config->getDestinationPath();
+    // 最后备份的文件名通过destPath得到
+    std::string backupFileName = fs::path(destPath).filename().string();
+    // 记录时间，精确到分钟
+    std::time_t now = std::time(nullptr);
+    std::tm* tm = std::localtime(&now);
+    char timeBuffer[64];
+    std::strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%d %H:%M", tm);
+    std::string backupTime = timeBuffer;
+    // 通过配置文件查看是否有加密等设置
+    bool isEncrypted = config->isEncryptionEnabled();
+    bool isPacked = config->isPackingEnabled();
+    bool isCompressed = config->isCompressionEnabled();
+    entry = BackupEntry(fileName, sourcePath, destDir, backupFileName, backupTime, isEncrypted, isPacked, isCompressed);
+    // 增加备份记录
+    backupRecords.push_back(entry);
+}
+
+
+    // std::string fileName;        // 源文件名
+    // std::string sourceFullPath;  // 源文件完整路径
+    // std::string destDirectory;   // 备份目标目录
+    // std::string backupFileName;  // 最终备份文件名
+    // std::string backupTime;      // 备份时间
+    // bool isEncrypted;            // 是否加密
+    // bool isPacked;               // 是否打包
+    // bool isCompressed;           // 是否压缩
