@@ -3,6 +3,8 @@
 #include "IPack.h"
 #include "myPack.h"
 #include <string>
+#include <vector>
+#include <algorithm>
 #include <memory>
 #include <iostream>
 #include <filesystem>

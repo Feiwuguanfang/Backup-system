@@ -7,6 +7,7 @@
 #include "CConfig.h"
 #include "PackFactory.h"
 #include "CompressFactory.h"
+#include "EncryptFactory.h"
 #include "CBackupRecorder.h"
 
 namespace fs = std::filesystem;
@@ -19,7 +20,7 @@ static std::string BACKUP_REPOSITORY_ROOT = ".\\backup_repository";
 
 static void printHelp(){
     std::cout << "Usage (pseudo CLI):\n"
-              << "--mode backup  --src <path> --dst <relative_path> [--include \".*\\.txt\"  --pack <packType>(default: none)  --compress <compressType>(default: none)]\n"
+              << "--mode backup  --src <path> --dst <relative_path> [--include \".*\\.txt\"  --pack <packType>(default: none)\n  --compress <compressType>(default: none)  --encrypt <encryptType>(default: none)  --key <encryptKey>]\n"
               << "--mode recover --dst <relative_path> --to <target_path>\n";
 }
 
@@ -45,6 +46,8 @@ static int runParsed(const std::vector<std::string>& args){
     std::string mode;
     std::string packType = "none";  // 新增加一个参数用于指定打包算法,默认不打包
     std::string compressType = "none";  // 新增加一个参数用于指定压缩算法,默认不压缩
+    std::string encryptType = "none";  // 新增加一个参数用于指定加密算法,默认不加密
+    std::string encryptKey;
     std::string srcPath;
     std::string dstPath;
     std::string includeRegex;
@@ -56,7 +59,9 @@ static int runParsed(const std::vector<std::string>& args){
         const std::string& arg = args[i];
         if (arg == "--mode") { nextVal(i, mode); }
         else if (arg == "--pack") { nextVal(i, packType); }
+        else if (arg == "--encrypt") { nextVal(i, encryptType); }
         else if (arg == "--compress") { nextVal(i, compressType); }
+        else if (arg == "--key") { nextVal(i, encryptKey); }
         else if (arg == "--src") { nextVal(i, srcPath); }
         else if (arg == "--dst") { nextVal(i, dstPath); }
         else if (arg == "--include") { nextVal(i, includeRegex); }
@@ -120,6 +125,26 @@ static int runParsed(const std::vector<std::string>& args){
                                 .setCompressionEnabled(true);
                     }
                 }
+
+                // 判断是否需要加密
+                if(encryptType != "none"){
+                    // 检查指定的加密器类型是否支持
+                    if(!EncryptFactory::isEncryptTypeSupported(encryptType)){
+                        std::cerr << "Error: Encrypt algorithm type " << encryptType << " is not supported.\n";
+                        return 1;
+                    }
+                    else{
+                        // 判断密码是不是空的，如果是空的需要报错
+                        if(encryptKey.empty()){
+                            std::cerr << "Error: Encrypt key is empty.\n";
+                            return 1;
+                        }
+                        // 设置加密器类型
+                        config->setEncryptType(encryptType)
+                                .setEncryptionEnabled(true)
+                                .setEncryptionKey(encryptKey);
+                    }
+                }
             }
         }
 
@@ -151,7 +176,33 @@ static int runParsed(const std::vector<std::string>& args){
         }
 
         // 可能有多个，需要让用户来选择
-        BackupEntry entry = records[0]; // 目前先默认选择第一个，后续可以改进为交互选择
+        BackupEntry entry; 
+        if(records.size() > 1){
+            // 此时进行交互式选择
+            // 将全部记录进行打印出来
+            std::cout << "Multiple back up records found for " << dstPath << ":\n";
+            for(size_t i = 0; i < records.size(); ++i){
+                // 现在先主要显示原先的备份路径和备份时间，还要展示是否有打包、压缩、加密等操作
+                std::cout << "[" << i << "] " << records[i].fileName << " @ " << records[i].backupTime << " (Pack: " << records[i].isPacked << ", Compress: " << records[i].isCompressed << ", Encrypt: " << records[i].isEncrypted << ")" << std::endl;
+            }
+            // 让用户选择
+            int choice;
+            while(true){
+                std::cout << "Please select the backup record to recover (0-" << records.size() - 1 << "): ";
+                std::cin >> choice;
+                if (choice < 0 || choice >= records.size()) {
+                    std::cerr << "Invalid choice. Please select a number between 0 and " << records.size() - 1 << ".\n";
+                }
+                else{
+                    break;
+                }
+            }
+            entry = records[choice];
+        }
+        else{
+            // 此时直接选择第一个
+            entry = records[0];
+        }
             
         // 执行恢复
         CBackup backup;

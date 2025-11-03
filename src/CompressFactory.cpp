@@ -1,13 +1,35 @@
 #include "CompressFactory.h"
 #include <stdexcept>
 
+// 字符串压缩类型转换为枚举类型
+CompressType CompressFactory::stringToCompressType(const std::string& compressType) {
+    if(compressType == "Huffman"){
+        return CompressType::Huffman;
+    }
+    // 后续继续补充
+    throw std::runtime_error("Unknown compress type: " + compressType);
+}
+
+// 枚举压缩类型转换为字符串类型
+std::string CompressFactory::compressTypeToString(CompressType compressType) {
+    if(compressType == CompressType::Huffman){
+        return "Huffman";
+    }
+    // 后续继续补充
+    throw std::runtime_error("Unknown compress type");
+}
+
 // 根据压缩类型创建实例（工厂模式核心逻辑）
 std::unique_ptr<ICompress> CompressFactory::createCompress(const std::string& compressType) {
     if(!isCompressTypeSupported(compressType)){
         throw std::runtime_error("Unknown compress type: " + compressType);
     }
-    if (compressType == "Huffman") {
-        return std::make_unique<HuffmanCompress>();  // 创建HuffmanCompress实例
+    CompressType type = stringToCompressType(compressType);
+    switch(type){
+        case CompressType::Huffman:
+            return std::make_unique<HuffmanCompress>();
+        default:
+            throw std::runtime_error("Unknown compress type: " + compressType);
     }
     // 后续继续补充
     return nullptr;
@@ -20,8 +42,8 @@ std::vector<std::string> CompressFactory::getSupportedCompressTypes() {
 
 
 bool CompressFactory::isCompressTypeSupported(const std::string& compressType) {
-    // 后续继续添加
-    return compressType == "Huffman";
+    const auto& supportTypes = getSupportedCompressTypes();
+    return std::find(supportTypes.begin(), supportTypes.end(), compressType) != supportTypes.end();
 }
 
 std::string CompressFactory::getCompressType(const std::string& filePath) {
@@ -35,11 +57,7 @@ std::string CompressFactory::getCompressType(const std::string& filePath) {
     in.seekg(1, std::ios::beg);
     CompressType type;
     in.read(reinterpret_cast<char*>(&type), sizeof(type));
-    if(type == CompressType::Huffman){
-        return "Huffman";
-    }
-    // 后续继续补充
-    return "";
+    return compressTypeToString(type);
 }
 
 bool CompressFactory::isCompressedFile(const std::string& filePath) {
@@ -55,5 +73,5 @@ bool CompressFactory::isCompressedFile(const std::string& filePath) {
     }
     uint8_t firstByte;
     in.read(reinterpret_cast<char*>(&firstByte), sizeof(firstByte));
-    return firstByte == 0x01 && getCompressType(filePath) != "";
+    return firstByte == 0x21 && getCompressType(filePath) != "";
 }
