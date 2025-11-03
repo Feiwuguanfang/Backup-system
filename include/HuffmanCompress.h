@@ -2,6 +2,7 @@
 #define HUFFMAN_COMPRESS_H
 
 #include "ICompress.h"
+#include "CRC32.h"
 #include <string>
 #include <filesystem>
 #include <fstream>
@@ -31,7 +32,7 @@ struct HNodeCmp{
 };
 
 struct Head{
-    uint8_t isCompress; // 是否压缩，1为压缩，0为不压缩，1字节
+    uint8_t isCompress; // 是否压缩，0x21为压缩，0x20为不压缩，1字节
     CompressType compressType; // 压缩算法类型，固定为1字节
     uint8_t validBits; // 最后一个字节的有效位，1字节
     uint8_t reservedBits; // 填充位，用于填充到字节边界，1字节

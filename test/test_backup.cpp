@@ -30,7 +30,7 @@ TEST(BackupTest, BasicBackup) {
     
     CBackup backup;
     std::string result = backup.doBackup(config);
-    EXPECT_TRUE(result.empty()) << "Backup failed: " << result;
+    EXPECT_TRUE(!result.empty()) << "Backup failed: " << result;
 
     // 检查备份文件是否存在
     std::ifstream backupFile(destPath);

@@ -7,7 +7,10 @@
 #include <regex>
 #include <memory>
 #include <map>
-
+#include <sstream>
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
 /**
  * @brief 配置类，负责存储和管理备份系统的所有配置项
  * @details 涵盖源路径、目标路径、文件筛选、备份行为（打包/压缩/加密）等配置，提供完整的 setter/getter 接口
@@ -226,6 +229,19 @@ public:
      * @return 加密密钥（const 引用，避免拷贝）
      */
     const std::string& getEncryptionKey() const;
+
+    /**
+     * 设置加密类型（启用加密时必须设置）
+     * @param type 加密类型字符串（默认 "SimXOR"）
+     * @return 返回自身引用，支持链式调用
+     */
+    CConfig& setEncryptType(const std::string& type);
+
+     /**
+     * 获取加密类型
+     * @return 加密类型（const 引用，避免拷贝）
+     */
+    const std::string& getEncryptType() const;
     
     // ===== 高级配置接口（自定义选项） =====
     /**
@@ -296,6 +312,7 @@ private:
     int m_compressionLevel = 1;                // 压缩级别（默认 1，1-9）
     bool m_enableEncryption = false;           // 是否启用加密
     std::string m_encryptionKey;               // 加密密钥
+    std::string m_encryptType = "SimXOR";      // 加密类型（默认 SimXOR）
     
     // 高级配置
     std::map<std::string, std::string> m_customOptions; // 自定义键值对配置

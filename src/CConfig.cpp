@@ -1,9 +1,4 @@
 #include "CConfig.h"
-#include <sstream>
-#include <filesystem>
-#include <iostream>
-#include <stdexcept>
-#include <string>
 
 // ===== 构造函数与析构函数实现 =====
 CConfig::CConfig() {
@@ -169,6 +164,16 @@ CConfig& CConfig::setEncryptionKey(const std::string& key) {
 const std::string& CConfig::getEncryptionKey() const {
     return m_encryptionKey; // 返回统一命名的成员变量
 }
+
+CConfig& CConfig::setEncryptType(const std::string& type) {
+    m_encryptType = type; // 赋值给统一命名的成员变量
+    return *this;
+}
+
+const std::string& CConfig::getEncryptType() const {
+    return m_encryptType; // 返回统一命名的成员变量
+}
+
 
 // ===== 高级配置接口实现 =====
 CConfig& CConfig::setCustomOption(const std::string& key, const std::string& value) {

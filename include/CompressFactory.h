@@ -4,6 +4,8 @@
 
 #include <string>
 #include <memory>
+#include <vector>
+#include <algorithm>
 #include "ICompress.h"  // 依赖ICompress抽象类
 #include "HuffmanCompress.h"
 
@@ -24,6 +26,12 @@ public:
 
     // 检查文件是否为压缩文件
     static bool isCompressedFile(const std::string& filePath);
+
+    // 将字符串类型转换为CompressType枚举类型
+    static CompressType stringToCompressType(const std::string& compressType);
+
+    // 将CompressType枚举类型转换为字符串类型
+    static std::string compressTypeToString(CompressType compressType);
 };
 
 #endif // COMPRESSFACTORY_H

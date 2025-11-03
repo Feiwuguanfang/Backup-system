@@ -1,15 +1,4 @@
-﻿#include <vector>
-#include <string>
-#include <fstream>
-#include <iostream>
-#include "PackFactory.h"  
-#include "CompressFactory.h"
-#include "CBackup.h"
-#include "CBackupRecorder.h"
-// 在CBackup.cpp的顶部添加
-#include <filesystem>  // C++17文件系统库，用于create_directories、is_regular_file等
-namespace fs = std::filesystem; 
-
+﻿#include "CBackup.h"
 
 /**
  * CBackup implementation
@@ -150,6 +139,39 @@ bool CBackup::doRecovery(const BackupEntry& entry, const std::string& destDir) {
     bool isDecompressed = false;
 
     // 先解密
+    EncryptFactory encryptFactory;
+    if(encryptFactory.isFileEncrypted(backupRoot + "/" + backupName)){
+        std::cout << "Decrypting file:" << backupName << std::endl;
+
+        // 向用户请求密码
+        std::string password;
+        std::cout << "Enter password for decrypting file " << backupName << ": ";
+        std::cin >> password;
+
+        // 创建对应类型加密器
+        std::string encryptType = encryptFactory.getEncryptType(backupRoot + "/" + backupName);
+        if(encryptType.empty()){
+            std::cerr << "Error: Unknown encrypt type for file: " << backupName << std::endl;
+            return false;
+        }
+        std::unique_ptr<IEncrypt> decryptor = nullptr;
+        try {
+            decryptor = encryptFactory.createEncryptor(encryptType);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to create decryptor: " << e.what() << std::endl;
+            return false;
+        }
+        // 解密到备份目录
+        // 这里是懒得改了
+        std::string sourcePath = backupRoot + "/" + backupName;
+        // 将后缀去除
+        backupName = backupName.substr(0, backupName.find_last_of('.'));
+        if (!decryptor->decryptFile(sourcePath, backupRoot + "/" + backupName, password)) {
+            std::cerr << "Error: Failed to decrypt file: " << backupName << std::endl;
+            return false;
+        }
+        isDecrypted = true;
+    }
 
     // 再解压缩
     CompressFactory compressFactory;
@@ -292,6 +314,7 @@ std::string CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
 
     // 5) 是否打包（基础版：若未启用打包，则直接镜像拷贝；启用打包则调用打包器）
     if (config->isPackingEnabled()) {
+        std::cout << "Packing files: " << filesToBackup.size() << std::endl;
         std::unique_ptr<IPack> packer = nullptr;
         try {
             packer = PackFactory::createPacker(config->getPackType());
@@ -303,6 +326,7 @@ std::string CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
         // 基础实现：将收集的文件直接打包到目标目录下（由具体打包器决定扩展名）
         // 调用打包器打包文件
         const std::string packedFilePath = packer->pack(filesToBackup, destinationRoot);
+        std::string compressedFilePath;
         destPath = packedFilePath;
         if (packedFilePath.empty()) {
             std::cerr << "Error: Failed to pack files" << std::endl;
@@ -311,6 +335,7 @@ std::string CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
 
         // 5.1)  打包完判断是否需要压缩
         if(config->isCompressionEnabled()){
+            std::cout << "Compressing file: " << packedFilePath << std::endl;
             std::unique_ptr<ICompress> compress = nullptr;
             try{
                 compress = CompressFactory::createCompress(config->getCompressionType());
@@ -319,8 +344,9 @@ std::string CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
                 return "";
             }
             // 这个路径需要斟酌一下，或许增加一个后缀，总之是要将之前的文件给覆盖了
-            const std::string compressedFilePath = compress->compressFile(packedFilePath);
+            compressedFilePath = compress->compressFile(packedFilePath);
             destPath = compressedFilePath;
+            std::cout << "Compressed file path: " << compressedFilePath << std::endl;
             if(compressedFilePath.empty()){
                 std::cerr << "Error: Failed to compress file" << std::endl;
                 return "";
@@ -336,7 +362,36 @@ std::string CBackup::doBackup(const std::shared_ptr<CConfig>& config) {
             }
         }
 
-        // TODO: 记录备份信息
+        // 5.2) 是否需要加密（这个应该是和压缩平行的，但是执行上需要在压缩后面）
+        if(config->isEncryptionEnabled()){
+            std::cout << "Encrypting file: " << (compressedFilePath.empty() ? packedFilePath : compressedFilePath) << std::endl;
+            std::unique_ptr<IEncrypt> encrypt = nullptr;
+            try{
+                encrypt = EncryptFactory::createEncryptor(config->getEncryptType());
+            } catch (const std::exception& e) {
+                std::cerr << "Error: Failed to create encrypt: " << e.what() << std::endl;
+                return "";
+            }
+            // 加密文件
+            const std::string encryptedFilePath = encrypt->encryptFile((compressedFilePath.empty() ? packedFilePath : compressedFilePath)
+                                                                        , config->getEncryptionKey());
+            destPath = encryptedFilePath;
+            std::cout << "Encrypted file path: " << encryptedFilePath << std::endl;
+            if(encryptedFilePath.empty()){
+                std::cerr << "Error: Failed to encrypt file" << std::endl;
+                return "";
+            }
+            // 要是加密成功的话就把之前的文件删掉
+            if(fs::exists(encryptedFilePath)){
+                try{
+                    fs::remove((compressedFilePath.empty() ? packedFilePath : compressedFilePath));
+                } catch (const std::exception& e) {
+                    std::cerr << "Error: Failed to remove compressed file: " << e.what() << std::endl;
+                    return "";
+                }
+            }
+        }
+
         return destPath;
     }
 

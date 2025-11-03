@@ -16,9 +16,9 @@ std::vector<std::string> PackFactory::getSupportedPackTypes(){
 }
 
 bool PackFactory::isPackTypeSupported(const std::string& packType){
-    return packType == "Basic";
+    const auto& supportTypes = getSupportedPackTypes();
+    return std::find(supportTypes.begin(), supportTypes.end(), packType) != supportTypes.end();
 }
-
 
 std::string PackFactory::getPackType(const std::string& filePath) {
     // 根据文件的第二个字节判断打包类型，第一个字节适用于判断当前文件是否为打包文件的标志位

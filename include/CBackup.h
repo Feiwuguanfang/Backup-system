@@ -6,8 +6,17 @@
 #include <memory>
 #include <ctime>
 #include <set>  
+#include <fstream>
+#include <iostream>
+
 #include "CConfig.h"
 #include "CBackupRecorder.h"
+
+#include "PackFactory.h"  
+#include "CompressFactory.h"
+#include "EncryptFactory.h"
+namespace fs = std::filesystem; 
+
 
 
 class CBackup {
