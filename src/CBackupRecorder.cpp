@@ -2,6 +2,7 @@
 #include <fstream>
 #include <algorithm>
 #include <iostream>
+#include <filesystem>
 
 using namespace std;
 namespace fs = std::filesystem; 
@@ -117,7 +118,8 @@ const std::vector<BackupEntry>& CBackupRecorder::getBackupRecords() const{
 std::vector<BackupEntry> CBackupRecorder::findBackupRecordsByFileName(const std::string& queryFileName) const{
     std::vector<BackupEntry> result;
     for(const auto& entry : backupRecords){
-        if(entry.fileName == queryFileName){
+        // 支持模糊搜索：检查文件名是否包含查询字符串
+        if(entry.fileName.find(queryFileName) != std::string::npos){
             result.push_back(entry);
         }
     }
@@ -148,23 +150,81 @@ size_t CBackupRecorder::getBackupRecordIndex(const BackupEntry& entry) const{
     return std::string::npos;
 }
 
-bool CBackupRecorder::deleteBackupRecord(size_t index){
-    if(isIndexValid(index)){
-        backupRecords.erase(backupRecords.begin() + index);
+// 删除备份文件或目录的辅助函数
+static bool deleteBackupFile(const BackupEntry& entry) {
+    try {
+        // 直接读取记录的目标路径递归删除
+        fs::path backupDirPath = fs::path(entry.destDirectory);
+        fs::path backupFilePath = backupDirPath / entry.backupFileName;
+        
+        bool deleted = false;
+        
+        // 首先尝试删除整个 destDirectory 目录（对于目录备份，这是整个备份的根目录）
+        if (fs::exists(backupDirPath) && fs::is_directory(backupDirPath)) {
+            // 递归删除整个目录
+            fs::remove_all(backupDirPath);
+            std::cout << "Deleted backup directory (recursive): " << backupDirPath.string() << std::endl;
+            deleted = true;
+        }
+        // 如果 destDirectory 不存在或不是目录，尝试删除 backupFilePath（打包的文件）
+        else if (fs::exists(backupFilePath)) {
+            if (fs::is_directory(backupFilePath)) {
+                fs::remove_all(backupFilePath);
+                std::cout << "Deleted backup directory: " << backupFilePath.string() << std::endl;
+                deleted = true;
+            } else if (fs::is_regular_file(backupFilePath)) {
+                fs::remove(backupFilePath);
+                std::cout << "Deleted backup file: " << backupFilePath.string() << std::endl;
+                deleted = true;
+            } else {
+                fs::remove(backupFilePath);
+                std::cout << "Deleted backup item: " << backupFilePath.string() << std::endl;
+                deleted = true;
+            }
+        }
+        
+        if (!deleted) {
+            std::cerr << "Warning: Backup file/directory not found: " << backupDirPath.string() 
+                      << " or " << backupFilePath.string() << std::endl;
+            return false;
+        }
+        
         return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error deleting backup file: " << e.what() << std::endl;
+        return false;
     }
-    std::cerr << "Error: Invalid index " << index << " for deleting backup record." << std::endl;
-    return false;
+}
+
+bool CBackupRecorder::deleteBackupRecord(size_t index){
+    if(!isIndexValid(index)){
+        std::cerr << "Error: Invalid index " << index << " for deleting backup record." << std::endl;
+        return false;
+    }
+    
+    // 在删除记录前，先删除对应的备份文件
+    const BackupEntry& entry = backupRecords[index];
+    deleteBackupFile(entry);
+    
+    // 删除记录
+    backupRecords.erase(backupRecords.begin() + index);
+    return true;
 }
 
 bool CBackupRecorder::deleteBackupRecord(const BackupEntry& entry){
     size_t index = getBackupRecordIndex(entry);
-    if(index != std::string::npos){
-        backupRecords.erase(backupRecords.begin() + index);
-        return true;
+    if(index == std::string::npos){
+        std::cerr << "Error: Backup record not found for deletion." << std::endl;
+        return false;
     }
-    std::cerr << "Error: Backup record not found for deletion." << std::endl;
-    return false;
+    
+    // 在删除记录前，先删除对应的备份文件（使用实际记录）
+    const BackupEntry& actualEntry = backupRecords[index];
+    deleteBackupFile(actualEntry);
+    
+    // 删除记录
+    backupRecords.erase(backupRecords.begin() + index);
+    return true;
 }
 
 bool CBackupRecorder::modifyBackupRecord(size_t index, const BackupEntry& newEntry){

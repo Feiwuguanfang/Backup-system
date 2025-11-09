@@ -2,6 +2,25 @@
 #include <filesystem>
 #include <fstream>
 #include <vector>
+#include <string>
+#include <memory>
+#include <algorithm>
+#include <cstring>
+
+// Windows API for file dialogs
+#ifdef _WIN32
+#include <windows.h>
+#include <shlobj.h>
+#include <commdlg.h>
+#pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "shell32.lib")
+#endif
+
+// ImGui and GLFW
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+#include <GLFW/glfw3.h>
 
 #include "CBackup.h"
 #include "CConfig.h"
@@ -15,226 +34,934 @@ namespace fs = std::filesystem;
 // 全局备份仓库路径配置
 static std::string BACKUP_REPOSITORY_ROOT = ".\\backup_repository";
 
-//--mode backup --src "F:\courser_project\software_development\testBox\ori_A" --dst "./"
-//--mode recover --dst "./" --to "./restore_repository/ori_A"
-
-static void printHelp(){
-    std::cout << "Usage (pseudo CLI):\n"
-              << "--mode backup  --src <path> --dst <relative_path> [--include \".*\\.txt\"  --pack <packType>(default: none)\n  --compress <compressType>(default: none)  --encrypt <encryptType>(default: none)  --key <encryptKey>]\n"
-              << "--mode recover --dst <relative_path> --to <target_path>\n";
-}
-
-
-static std::vector<std::string> tokenize(const std::string& line){
-    std::vector<std::string> tokens;
-    std::string cur;
-    bool inQuotes = false;
-    for (size_t i = 0; i < line.size(); ++i) {
-        char c = line[i];
-        if (c == '"') { inQuotes = !inQuotes; continue; }
-        if (!inQuotes && std::isspace(static_cast<unsigned char>(c))) {
-            if (!cur.empty()) { tokens.push_back(cur); cur.clear(); }
-        } else {
-            cur.push_back(c);
-        }
+// Windows 文件/文件夹选择对话框辅助函数
+#ifdef _WIN32
+// 回调函数用于设置初始路径
+static int CALLBACK BrowseCallbackProc(HWND hwnd, UINT uMsg, LPARAM lParam, LPARAM lpData) {
+    if (uMsg == BFFM_INITIALIZED && lpData) {
+        SendMessage(hwnd, BFFM_SETSELECTION, TRUE, lpData);
     }
-    if (!cur.empty()) tokens.push_back(cur);
-    return tokens;
+    return 0;
 }
 
-static int runParsed(const std::vector<std::string>& args){
-    std::string mode;
-    std::string packType = "none";  // 新增加一个参数用于指定打包算法,默认不打包
-    std::string compressType = "none";  // 新增加一个参数用于指定压缩算法,默认不压缩
-    std::string encryptType = "none";  // 新增加一个参数用于指定加密算法,默认不加密
-    std::string encryptKey;
-    std::string srcPath;
-    std::string dstPath;
-    std::string includeRegex;
-    std::string restoreTo;
-    std::string repoPath;
-
-    auto nextVal = [&](size_t& i, std::string& out){ if (i + 1 < args.size()) { out = args[++i]; return true; } return false; };
-    for (size_t i = 0; i < args.size(); ++i) {
-        const std::string& arg = args[i];
-        if (arg == "--mode") { nextVal(i, mode); }
-        else if (arg == "--pack") { nextVal(i, packType); }
-        else if (arg == "--encrypt") { nextVal(i, encryptType); }
-        else if (arg == "--compress") { nextVal(i, compressType); }
-        else if (arg == "--key") { nextVal(i, encryptKey); }
-        else if (arg == "--src") { nextVal(i, srcPath); }
-        else if (arg == "--dst") { nextVal(i, dstPath); }
-        else if (arg == "--include") { nextVal(i, includeRegex); }
-        else if (arg == "--to") { nextVal(i, restoreTo); }
-        else if (arg == "--repo") { nextVal(i, repoPath); }
-        else if (arg == "--help" || arg == "-h") { printHelp(); return 0; }
+// 选择文件夹
+static std::string BrowseForFolder(const std::string& initialPath = "") {
+    BROWSEINFO bi = {0};
+    bi.lpszTitle = "Select a folder:";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    
+    // 设置初始路径
+    static char initialDir[MAX_PATH] = {0};
+    if (!initialPath.empty() && fs::exists(initialPath)) {
+        strncpy(initialDir, initialPath.c_str(), MAX_PATH - 1);
+        initialDir[MAX_PATH - 1] = '\0';
+        bi.lpfn = BrowseCallbackProc;
+        bi.lParam = reinterpret_cast<LPARAM>(initialDir);
     }
     
-    // 设置备份仓库路径
-    if (!repoPath.empty()) {
-        BACKUP_REPOSITORY_ROOT = repoPath;
-        std::cout << "Backup repository set to: " << BACKUP_REPOSITORY_ROOT << std::endl;
-        return 0;
+    LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+    if (pidl != nullptr) {
+        char path[MAX_PATH];
+        if (SHGetPathFromIDList(pidl, path)) {
+            IMalloc* imalloc = nullptr;
+            if (SUCCEEDED(SHGetMalloc(&imalloc))) {
+                imalloc->Free(pidl);
+                imalloc->Release();
+            }
+            return std::string(path);
+        }
+        IMalloc* imalloc = nullptr;
+        if (SUCCEEDED(SHGetMalloc(&imalloc))) {
+            imalloc->Free(pidl);
+            imalloc->Release();
+        }
+    }
+    return "";
+}
+
+// 选择文件
+static std::string BrowseForFile(const std::string& initialPath = "", const char* filter = "All Files\0*.*\0") {
+    OPENFILENAMEA ofn = {0};
+    char szFile[260] = {0};
+    
+    // 如果初始路径是文件，使用其父目录；如果是目录，直接使用
+    std::string initialDir = initialPath;
+    if (!initialPath.empty() && fs::exists(initialPath)) {
+        if (fs::is_regular_file(initialPath)) {
+            initialDir = fs::path(initialPath).parent_path().string();
+            // 同时设置默认文件名
+            strncpy(szFile, initialPath.c_str(), sizeof(szFile) - 1);
+        }
+    }
+    
+    ofn.lStructSize = sizeof(ofn);
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = sizeof(szFile);
+    ofn.lpstrFilter = filter;
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = nullptr;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = initialDir.empty() ? nullptr : initialDir.c_str();
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+    
+    if (GetOpenFileNameA(&ofn)) {
+        return std::string(szFile);
+    }
+    return "";
+}
+#endif
+
+// GUI 状态变量
+struct BackupState {
+    char sourcePath[512] = "";
+    char destPath[512] = "";
+    int sourceType = 0; // 0: 文件夹, 1: 文件
+    bool enablePack = false;
+    int packTypeIndex = 0;
+    bool enableCompress = false;
+    int compressTypeIndex = 0;
+    bool enableEncrypt = false;
+    int encryptTypeIndex = 0;
+    char encryptKey[256] = "";
+    char includeRegex[256] = "";
+    std::string statusMessage = "";
+    bool statusIsError = false;
+};
+
+struct RecoverState {
+    int selectedRecordIndex = -1;
+    char restoreToPath[512] = "";
+    char passwordInput[256] = "";
+    bool showPasswordDialog = false;
+    std::string statusMessage = "";
+    bool statusIsError = false;
+    // 查询相关字段
+    int queryType = 0; // 0: 按名称, 1: 按时间
+    char queryNameInput[256] = "";
+    char queryStartTime[64] = "";
+    char queryEndTime[64] = "";
+    std::vector<BackupEntry> queryResults;
+    bool isQueryMode = false; // 是否处于查询模式
+    std::string queryStatusMessage = "";
+};
+
+struct RecordsState {
+    int selectedRecordIndex = -1;
+    char repoPath[512] = "";
+    bool repoPathChanged = false;
+    // 查询相关字段
+    int queryType = 0; // 0: 按名称, 1: 按时间
+    char queryNameInput[256] = "";
+    char queryStartTime[64] = "";
+    char queryEndTime[64] = "";
+    std::vector<BackupEntry> queryResults;
+    bool isQueryMode = false; // 是否处于查询模式
+    std::string queryStatusMessage = "";
+};
+
+// 执行备份操作
+static void executeBackup(BackupState& state, CBackupRecorder& recorder) {
+    if (strlen(state.sourcePath) == 0 || strlen(state.destPath) == 0) {
+        state.statusMessage = "Error: Source path and destination path are required!";
+        state.statusIsError = true;
+        return;
     }
 
-    // 创建备份记录器
-    CBackupRecorder backupRecorder(BACKUP_REPOSITORY_ROOT);
-
-    if (mode == "backup") {
-        if (srcPath.empty() || dstPath.empty()) { printHelp(); return 1; }
-        
-        // 计算实际备份路径：仓库路径 + 相对路径 
+    try {
+        // 计算实际备份路径
         std::string actualBackupPath = BACKUP_REPOSITORY_ROOT;
-        if (!dstPath.empty()) {
-            fs::path dst = fs::path(dstPath);
+        if (strlen(state.destPath) > 0) {
+            fs::path dst = fs::path(state.destPath);
             actualBackupPath = fs::absolute(fs::path(BACKUP_REPOSITORY_ROOT) / dst).string();
         }
 
-        std::cout << "Source: " << srcPath << std::endl;
-        std::cout << "Relative path: " << dstPath << std::endl;
-        std::cout << "Actual backup path: " << actualBackupPath << std::endl;
-        
-        // 将这里的路径设置为绝对路径
+        // 创建配置
         auto config = std::make_shared<CConfig>();
-        config->setSourcePath(fs::absolute(fs::path(srcPath)).string())
+        config->setSourcePath(fs::absolute(fs::path(state.sourcePath)).string())
               .setDestinationPath(fs::absolute(fs::path(actualBackupPath)).string())
               .setRecursiveSearch(true);
 
-        // 判断是否需要打包
-        if(packType != "none"){
-            // 检查指定的打包器类型是否支持
-            if(!PackFactory::isPackTypeSupported(packType)){
-                std::cerr << "Error: Packing algorithm type " << packType << " is not supported.\n";
-                return 1;
+        // 获取支持的算法类型
+        auto packTypes = PackFactory::getSupportedPackTypes();
+        auto compressTypes = CompressFactory::getSupportedCompressTypes();
+        auto encryptTypes = EncryptFactory::getSupportedEncryptTypes();
+
+        // 设置打包
+        if (state.enablePack && state.packTypeIndex < packTypes.size()) {
+            std::string packType = packTypes[state.packTypeIndex];
+            if (!PackFactory::isPackTypeSupported(packType)) {
+                state.statusMessage = "Error: Packing algorithm type " + packType + " is not supported.";
+                state.statusIsError = true;
+                return;
             }
-            else{
-                // 设置打包器类型
-                config->setPackType(packType)
-                        .setPackingEnabled(true);
+            config->setPackType(packType).setPackingEnabled(true);
 
-                // 判断是否需要压缩
-                if(compressType != "none"){
-                    // 检查指定的压缩器类型是否支持
-                    if(!CompressFactory::isCompressTypeSupported(compressType)){
-                        std::cerr << "Error: Compress algorithm type " << compressType << " is not supported.\n";
-                        return 1;
-                    }
-                    else{
-                        // 设置压缩器类型
-                        config->setCompressionType(compressType)
-                                .setCompressionEnabled(true);
-                    }
+            // 设置压缩
+            if (state.enableCompress && state.compressTypeIndex < compressTypes.size()) {
+                std::string compressType = compressTypes[state.compressTypeIndex];
+                if (!CompressFactory::isCompressTypeSupported(compressType)) {
+                    state.statusMessage = "Error: Compress algorithm type " + compressType + " is not supported.";
+                    state.statusIsError = true;
+                    return;
                 }
+                config->setCompressionType(compressType).setCompressionEnabled(true);
+            }
 
-                // 判断是否需要加密
-                if(encryptType != "none"){
-                    // 检查指定的加密器类型是否支持
-                    if(!EncryptFactory::isEncryptTypeSupported(encryptType)){
-                        std::cerr << "Error: Encrypt algorithm type " << encryptType << " is not supported.\n";
-                        return 1;
-                    }
-                    else{
-                        // 判断密码是不是空的，如果是空的需要报错
-                        if(encryptKey.empty()){
-                            std::cerr << "Error: Encrypt key is empty.\n";
-                            return 1;
-                        }
-                        // 设置加密器类型
+            // 设置加密
+            if (state.enableEncrypt && state.encryptTypeIndex < encryptTypes.size()) {
+                std::string encryptType = encryptTypes[state.encryptTypeIndex];
+                if (!EncryptFactory::isEncryptTypeSupported(encryptType)) {
+                    state.statusMessage = "Error: Encrypt algorithm type " + encryptType + " is not supported.";
+                    state.statusIsError = true;
+                    return;
+                }
+                if (strlen(state.encryptKey) == 0) {
+                    state.statusMessage = "Error: Encrypt key is required when encryption is enabled.";
+                    state.statusIsError = true;
+                    return;
+                }
                         config->setEncryptType(encryptType)
                                 .setEncryptionEnabled(true)
-                                .setEncryptionKey(encryptKey);
-                    }
-                }
+                      .setEncryptionKey(state.encryptKey);
             }
         }
 
-        // 备份执行
-        if (!includeRegex.empty()) config->addIncludePattern(includeRegex);
+        // 设置文件过滤
+        if (strlen(state.includeRegex) > 0) {
+            config->addIncludePattern(state.includeRegex);
+        }
+
+        // 执行备份
         CBackup backup;
         std::string destPath = backup.doBackup(config);
-        if (destPath.empty()) { std::cerr << "Backup failed" << std::endl; return 2; }
-        std::cout << "Backup finished -> " << destPath << std::endl;
-        // 备份记录
-        backupRecorder.addBackupRecord(config, destPath);
-        return 0;
-    } else if (mode == "recover") {
-        if (dstPath.empty() || restoreTo.empty()) { printHelp(); return 1; }
-        // 把目标路径转换为绝对路径
-        restoreTo = fs::absolute(fs::path(restoreTo)).string();
-        
-        // 这个时候就查看有没有备份记录，如果是空的，就提示用户没有备份记录
-        if(backupRecorder.getBackupRecords().empty()){
-            std::cerr << "Error: No backup records found. Please run backup first.\n";
-            return 1;
+        if (destPath.empty()) {
+            state.statusMessage = "Backup failed!";
+            state.statusIsError = true;
+            return;
         }
 
-        // 查找备份记录中是否有匹配的文件名
-        auto records = backupRecorder.findBackupRecordsByFileName(dstPath);
-        if(records.empty()){
-            std::cerr << "Error: No backup records found for file " << dstPath << ". Please check the filename.\n";
-            return 1;
-        }
+        // 添加备份记录
+        recorder.addBackupRecord(config, destPath);
+        recorder.saveBackupRecordsToFile(recorder.getRecorderFilePath());
 
-        // 可能有多个，需要让用户来选择
-        BackupEntry entry; 
-        if(records.size() > 1){
-            // 此时进行交互式选择
-            // 将全部记录进行打印出来
-            std::cout << "Multiple back up records found for " << dstPath << ":\n";
-            for(size_t i = 0; i < records.size(); ++i){
-                // 现在先主要显示原先的备份路径和备份时间，还要展示是否有打包、压缩、加密等操作
-                std::cout << "[" << i << "] " << records[i].fileName << " @ " << records[i].backupTime << " (Pack: " << records[i].isPacked << ", Compress: " << records[i].isCompressed << ", Encrypt: " << records[i].isEncrypted << ")" << std::endl;
-            }
-            // 让用户选择
-            int choice;
-            while(true){
-                std::cout << "Please select the backup record to recover (0-" << records.size() - 1 << "): ";
-                std::cin >> choice;
-                if (choice < 0 || choice >= records.size()) {
-                    std::cerr << "Invalid choice. Please select a number between 0 and " << records.size() - 1 << ".\n";
-                }
-                else{
-                    break;
-                }
-            }
-            entry = records[choice];
-        }
-        else{
-            // 此时直接选择第一个
-            entry = records[0];
-        }
-            
-        // 执行恢复
-        CBackup backup;
-        bool success = backup.doRecovery(entry, restoreTo);
-        
-        if (!success) { 
-            std::cerr << "Recovery failed" << std::endl; 
-            return 2; 
-        }
-        std::cout << "Recovery finished -> " << restoreTo << std::endl;
-        return 0;
+        state.statusMessage = "Backup finished successfully! -> " + destPath;
+        state.statusIsError = false;
+    } catch (const std::exception& e) {
+        state.statusMessage = "Error: " + std::string(e.what());
+        state.statusIsError = true;
     }
-    printHelp();
-    return 1;
 }
 
-int main(){
-    std::cout << "Backup interactive CLI. Type 'help' for usage, 'demo' for example, 'exit' to quit." << std::endl;
-    printHelp();
-    std::string line;
-    while (true) {
-        std::cout << "> ";
-        if (!std::getline(std::cin, line)) break;
-        // 去掉首尾空白
-        auto trim = [](std::string s){ size_t a = s.find_first_not_of(" \t\r\n"); size_t b = s.find_last_not_of(" \t\r\n"); if (a==std::string::npos) return std::string(); return s.substr(a, b-a+1); };
-        line = trim(line);
-        if (line.empty()) continue;
-        if (line == "exit" || line == "quit") break;
-        if (line == "help" || line == "--help" || line == "-h") { printHelp(); continue; }
-        auto tokens = tokenize(line);
-        if (tokens.empty()) continue;
-        runParsed(tokens);
+// 执行还原操作
+static void executeRecover(RecoverState& state, CBackupRecorder& recorder) {
+    if (state.selectedRecordIndex < 0) {
+        state.statusMessage = "Error: Please select a backup record!";
+        state.statusIsError = true;
+        return;
     }
+
+    BackupEntry entry;
+    if (state.isQueryMode) {
+        // 查询模式下，从查询结果中获取记录
+        if (state.selectedRecordIndex >= static_cast<int>(state.queryResults.size())) {
+            state.statusMessage = "Error: Invalid record index!";
+            state.statusIsError = true;
+            return;
+        }
+        entry = state.queryResults[state.selectedRecordIndex];
+        // 需要找到原始记录在完整列表中的索引，用于后续操作
+        // 这里直接使用 entry 对象，因为 doRecovery 只需要 BackupEntry
+    } else {
+        // 正常模式下，从完整记录列表中获取
+        auto records = recorder.getBackupRecords();
+        if (state.selectedRecordIndex >= static_cast<int>(records.size())) {
+            state.statusMessage = "Error: Invalid record index!";
+            state.statusIsError = true;
+            return;
+        }
+        entry = records[state.selectedRecordIndex];
+    }
+
+    if (strlen(state.restoreToPath) == 0) {
+        state.statusMessage = "Error: Restore destination path is required!";
+        state.statusIsError = true;
+        return;
+    }
+
+    try {
+        std::string restoreTo = fs::absolute(fs::path(state.restoreToPath)).string();
+        CBackup backup;
+        bool success;
+        
+        // 使用带密码参数的重载版本
+        if (entry.isEncrypted) {
+            success = backup.doRecovery(entry, restoreTo, state.passwordInput);
+        } else {
+            success = backup.doRecovery(entry, restoreTo, "");
+        }
+        
+        if (!success) {
+            state.statusMessage = "Recovery failed!";
+            state.statusIsError = true;
+            return;
+        }
+
+        state.statusMessage = "Recovery finished successfully! -> " + restoreTo;
+        state.statusIsError = false;
+        state.showPasswordDialog = false;
+        memset(state.passwordInput, 0, sizeof(state.passwordInput));
+    } catch (const std::exception& e) {
+        state.statusMessage = "Error: " + std::string(e.what());
+        state.statusIsError = true;
+    }
+}
+
+// 渲染备份界面
+static void renderBackupTab(BackupState& state, CBackupRecorder& recorder) {
+    ImGui::Text("Backup Configuration");
+    ImGui::Separator();
+
+    // 源路径选择
+    ImGui::Text("Source Path (File or Directory):");
+    
+    // 文件/文件夹类型选择
+    ImGui::RadioButton("Folder", &state.sourceType, 0);
+    
+    ImGui::SameLine();
+    ImGui::RadioButton("File", &state.sourceType, 1);
+    
+    // 路径输入框和浏览按钮
+    ImGui::InputText("##source", state.sourcePath, sizeof(state.sourcePath));
+    ImGui::SameLine();
+    if (ImGui::Button("Browse...")) {
+#ifdef _WIN32
+        std::string currentPath = state.sourcePath;
+        std::string selectedPath;
+        
+        // 根据用户选择打开对应的对话框
+        if (state.sourceType == 1) {
+            // 选择文件
+            selectedPath = BrowseForFile(currentPath);
+        } else {
+            // 选择文件夹（默认）
+            selectedPath = BrowseForFolder(currentPath);
+        }
+        
+        if (!selectedPath.empty()) {
+            strncpy(state.sourcePath, selectedPath.c_str(), sizeof(state.sourcePath) - 1);
+            state.sourcePath[sizeof(state.sourcePath) - 1] = '\0';
+        }
+#else
+        // 非 Windows 平台，保持原有行为
+        ImGui::OpenPopup("Source Path Input");
+#endif
+    }
+
+    // 目标路径（相对路径）
+    ImGui::Text("Destination Relative Path:");
+    ImGui::InputText("##dest", state.destPath, sizeof(state.destPath));
+    ImGui::TextDisabled("(Relative to backup repository: %s)", BACKUP_REPOSITORY_ROOT.c_str());
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Text("Options:");
+
+    // 打包选项
+    ImGui::Checkbox("Enable Packing", &state.enablePack);
+    if (state.enablePack) {
+        ImGui::Indent();
+        auto packTypes = PackFactory::getSupportedPackTypes();
+        const char* packItems[10];
+        for (size_t i = 0; i < packTypes.size() && i < 10; i++) {
+            packItems[i] = packTypes[i].c_str();
+        }
+        ImGui::Combo("Pack Algorithm", &state.packTypeIndex, packItems, packTypes.size());
+
+        // 压缩选项（仅在打包时可用）
+        ImGui::Checkbox("Enable Compression", &state.enableCompress);
+        if (state.enableCompress) {
+            ImGui::Indent();
+            auto compressTypes = CompressFactory::getSupportedCompressTypes();
+            const char* compressItems[10];
+            for (size_t i = 0; i < compressTypes.size() && i < 10; i++) {
+                compressItems[i] = compressTypes[i].c_str();
+            }
+            ImGui::Combo("Compress Algorithm", &state.compressTypeIndex, compressItems, compressTypes.size());
+            ImGui::Unindent();
+        }
+
+        // 加密选项（仅在打包时可用）
+        ImGui::Checkbox("Enable Encryption", &state.enableEncrypt);
+        if (state.enableEncrypt) {
+            ImGui::Indent();
+            auto encryptTypes = EncryptFactory::getSupportedEncryptTypes();
+            const char* encryptItems[10];
+            for (size_t i = 0; i < encryptTypes.size() && i < 10; i++) {
+                encryptItems[i] = encryptTypes[i].c_str();
+            }
+            ImGui::Combo("Encrypt Algorithm", &state.encryptTypeIndex, encryptItems, encryptTypes.size());
+            ImGui::InputText("Encryption Key", state.encryptKey, sizeof(state.encryptKey), ImGuiInputTextFlags_Password);
+            ImGui::Unindent();
+        }
+        ImGui::Unindent();
+    }
+
+    // 文件过滤
+    ImGui::Spacing();
+    ImGui::Text("File Filter (Regex, optional):");
+    ImGui::InputText("##regex", state.includeRegex, sizeof(state.includeRegex));
+    ImGui::TextDisabled("Example: .*\\.txt");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // 执行备份按钮
+    if (ImGui::Button("Start Backup", ImVec2(-1, 0))) {
+        executeBackup(state, recorder);
+    }
+
+    // 状态消息
+    if (!state.statusMessage.empty()) {
+        ImGui::Spacing();
+        if (state.statusIsError) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
+        }
+        ImGui::TextWrapped("%s", state.statusMessage.c_str());
+        ImGui::PopStyleColor();
+    }
+}
+
+// 渲染还原界面
+static void renderRecoverTab(RecoverState& state, CBackupRecorder& recorder) {
+    ImGui::Text("Recovery Configuration");
+    ImGui::Separator();
+
+    auto allRecords = recorder.getBackupRecords();
+    
+    if (allRecords.empty()) {
+        ImGui::TextWrapped("No backup records found. Please create a backup first.");
+        return;
+    }
+
+    // 查询区域
+    ImGui::Text("Search Records:");
+    const char* queryTypes[] = { "By Name", "By Time Range" };
+    ImGui::Combo("Query Type", &state.queryType, queryTypes, IM_ARRAYSIZE(queryTypes));
+
+    if (state.queryType == 0) {
+        // 按名称查询
+        ImGui::Text("File Name:");
+        ImGui::InputText("##queryName", state.queryNameInput, sizeof(state.queryNameInput));
+        ImGui::SameLine();
+        if (ImGui::Button("Search")) {
+            if (strlen(state.queryNameInput) > 0) {
+                state.queryResults = recorder.findBackupRecordsByFileName(state.queryNameInput);
+                state.isQueryMode = true;
+                state.selectedRecordIndex = -1;
+                if (state.queryResults.empty()) {
+                    state.queryStatusMessage = "No records found matching: " + std::string(state.queryNameInput);
+                } else {
+                    state.queryStatusMessage = "Found " + std::to_string(state.queryResults.size()) + " record(s)";
+                }
+            } else {
+                state.queryStatusMessage = "Error: Please enter a file name to search";
+            }
+        }
+    } else {
+        // 按时间范围查询
+        ImGui::Text("Start Time (YYYY-MM-DD HH:MM):");
+        ImGui::InputText("##startTime", state.queryStartTime, sizeof(state.queryStartTime));
+        ImGui::Text("End Time (YYYY-MM-DD HH:MM):");
+        ImGui::InputText("##endTime", state.queryEndTime, sizeof(state.queryEndTime));
+        ImGui::SameLine();
+        if (ImGui::Button("Search")) {
+            if (strlen(state.queryStartTime) > 0 && strlen(state.queryEndTime) > 0) {
+                state.queryResults = recorder.findBackupRecordsByBackupTime(
+                    state.queryStartTime, state.queryEndTime);
+                state.isQueryMode = true;
+                state.selectedRecordIndex = -1;
+                if (state.queryResults.empty()) {
+                    state.queryStatusMessage = "No records found in time range: " + 
+                        std::string(state.queryStartTime) + " to " + std::string(state.queryEndTime);
+                } else {
+                    state.queryStatusMessage = "Found " + std::to_string(state.queryResults.size()) + " record(s)";
+                }
+            } else {
+                state.queryStatusMessage = "Error: Please enter both start time and end time";
+            }
+        }
+    }
+
+    // 显示查询状态消息
+    if (!state.queryStatusMessage.empty()) {
+        ImGui::Spacing();
+        if (state.queryStatusMessage.find("Error") != std::string::npos) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
+        }
+        ImGui::TextWrapped("%s", state.queryStatusMessage.c_str());
+        ImGui::PopStyleColor();
+    }
+
+    // 清除查询按钮
+    if (state.isQueryMode) {
+        ImGui::SameLine();
+        if (ImGui::Button("Clear Search")) {
+            state.isQueryMode = false;
+            state.queryResults.clear();
+            state.selectedRecordIndex = -1;
+            state.queryStatusMessage = "";
+            memset(state.queryNameInput, 0, sizeof(state.queryNameInput));
+            memset(state.queryStartTime, 0, sizeof(state.queryStartTime));
+            memset(state.queryEndTime, 0, sizeof(state.queryEndTime));
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // 获取要显示的记录列表
+    std::vector<BackupEntry> displayRecords;
+    if (state.isQueryMode) {
+        displayRecords = state.queryResults;
+    } else {
+        displayRecords = allRecords;
+    }
+
+    if (displayRecords.empty()) {
+        ImGui::TextWrapped("No backup records found.");
+        return;
+    }
+
+    // 备份记录列表
+    std::string listTitle = state.isQueryMode ? 
+        "Search Results - Select Backup Record (" + std::to_string(displayRecords.size()) + " found):" :
+        "Select Backup Record (" + std::to_string(displayRecords.size()) + " total):";
+    ImGui::Text("%s", listTitle.c_str());
+    if (ImGui::BeginListBox("##records", ImVec2(-1, 200))) {
+        for (size_t i = 0; i < displayRecords.size(); i++) {
+            const auto& record = displayRecords[i];
+            std::string label = record.fileName + " @ " + record.backupTime;
+            if (record.isPacked) label += " [Pack]";
+            if (record.isCompressed) label += " [Compress]";
+            if (record.isEncrypted) label += " [Encrypt]";
+            
+            if (ImGui::Selectable(label.c_str(), state.selectedRecordIndex == static_cast<int>(i))) {
+                state.selectedRecordIndex = static_cast<int>(i);
+            }
+        }
+        ImGui::EndListBox();
+    }
+
+    if (state.selectedRecordIndex >= 0 && state.selectedRecordIndex < static_cast<int>(displayRecords.size())) {
+        const auto& selected = displayRecords[state.selectedRecordIndex];
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Text("Selected Record Details:");
+        ImGui::Text("File Name: %s", selected.fileName.c_str());
+        ImGui::Text("Source Path: %s", selected.sourceFullPath.c_str());
+        ImGui::Text("Backup Time: %s", selected.backupTime.c_str());
+        ImGui::Text("Backup File: %s", selected.backupFileName.c_str());
+        ImGui::Text("Packed: %s", selected.isPacked ? "Yes" : "No");
+        ImGui::Text("Compressed: %s", selected.isCompressed ? "Yes" : "No");
+        ImGui::Text("Encrypted: %s", selected.isEncrypted ? "Yes" : "No");
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Text("Restore Destination Path:");
+        ImGui::InputText("##restoreTo", state.restoreToPath, sizeof(state.restoreToPath));
+
+        ImGui::Spacing();
+        if (ImGui::Button("Start Recovery", ImVec2(-1, 0))) {
+            if (selected.isEncrypted) {
+                state.showPasswordDialog = true;
+            } else {
+                executeRecover(state, recorder);
+            }
+        }
+    }
+
+    // 密码输入对话框
+    if (state.showPasswordDialog) {
+        ImGui::OpenPopup("Enter Password");
+    }
+
+    if (ImGui::BeginPopupModal("Enter Password", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
+        ImGui::Text("This backup is encrypted. Please enter the password:");
+        ImGui::Spacing();
+        ImGui::InputText("Password", state.passwordInput, sizeof(state.passwordInput), ImGuiInputTextFlags_Password);
+        
+        // 在对话框中显示错误消息
+        if (!state.statusMessage.empty() && state.statusIsError) {
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+            ImGui::TextWrapped("%s", state.statusMessage.c_str());
+            ImGui::PopStyleColor();
+        }
+        
+        ImGui::Spacing();
+        if (ImGui::Button("OK", ImVec2(120, 0))) {
+            if (strlen(state.passwordInput) > 0) {
+                executeRecover(state, recorder);
+                if (!state.statusIsError) {
+                    // 成功后才关闭对话框
+                    state.showPasswordDialog = false;
+                    ImGui::CloseCurrentPopup();
+                }
+            } else {
+                state.statusMessage = "Error: Password cannot be empty!";
+                state.statusIsError = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            state.showPasswordDialog = false;
+            memset(state.passwordInput, 0, sizeof(state.passwordInput));
+            state.statusMessage = "";
+            state.statusIsError = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    // 状态消息
+    if (!state.statusMessage.empty()) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        if (state.statusIsError) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
+        }
+        ImGui::TextWrapped("%s", state.statusMessage.c_str());
+        ImGui::PopStyleColor();
+    }
+}
+
+// 渲染备份记录查看界面
+static void renderRecordsTab(RecordsState& state, CBackupRecorder& recorder) {
+    ImGui::Text("Backup Records");
+    ImGui::Separator();
+
+    // 备份仓库路径设置
+    ImGui::Text("Backup Repository Path:");
+    if (strlen(state.repoPath) == 0) {
+        strncpy(state.repoPath, BACKUP_REPOSITORY_ROOT.c_str(), sizeof(state.repoPath) - 1);
+    }
+    ImGui::InputText("##repo", state.repoPath, sizeof(state.repoPath));
+    ImGui::SameLine();
+#ifdef _WIN32
+    if (ImGui::Button("Browse...")) {
+        std::string selectedPath = BrowseForFolder(state.repoPath);
+        if (!selectedPath.empty()) {
+            strncpy(state.repoPath, selectedPath.c_str(), sizeof(state.repoPath) - 1);
+            state.repoPath[sizeof(state.repoPath) - 1] = '\0';
+        }
+    }
+    ImGui::SameLine();
+#endif
+    if (ImGui::Button("Set")) {
+        BACKUP_REPOSITORY_ROOT = state.repoPath;
+        // 重新加载记录器
+        recorder.loadBackupRecordsFromFile(recorder.getRecorderFilePath());
+        state.repoPathChanged = true;
+        ImGui::Text("Repository path updated!");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // 刷新按钮
+    if (ImGui::Button("Refresh Records")) {
+        recorder.loadBackupRecordsFromFile(recorder.getRecorderFilePath());
+        state.isQueryMode = false; // 刷新时退出查询模式
+        state.queryResults.clear();
+        state.selectedRecordIndex = -1;
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // 查询区域
+    ImGui::Text("Search Records:");
+    const char* queryTypes[] = { "By Name", "By Time Range" };
+    ImGui::Combo("Query Type", &state.queryType, queryTypes, IM_ARRAYSIZE(queryTypes));
+
+    if (state.queryType == 0) {
+        // 按名称查询
+        ImGui::Text("File Name:");
+        ImGui::InputText("##queryName", state.queryNameInput, sizeof(state.queryNameInput));
+        ImGui::SameLine();
+        if (ImGui::Button("Search")) {
+            if (strlen(state.queryNameInput) > 0) {
+                state.queryResults = recorder.findBackupRecordsByFileName(state.queryNameInput);
+                state.isQueryMode = true;
+                state.selectedRecordIndex = -1;
+                if (state.queryResults.empty()) {
+                    state.queryStatusMessage = "No records found matching: " + std::string(state.queryNameInput);
+                } else {
+                    state.queryStatusMessage = "Found " + std::to_string(state.queryResults.size()) + " record(s)";
+                }
+            } else {
+                state.queryStatusMessage = "Error: Please enter a file name to search";
+            }
+        }
+    } else {
+        // 按时间范围查询
+        ImGui::Text("Start Time (YYYY-MM-DD HH:MM):");
+        ImGui::InputText("##startTime", state.queryStartTime, sizeof(state.queryStartTime));
+        ImGui::Text("End Time (YYYY-MM-DD HH:MM):");
+        ImGui::InputText("##endTime", state.queryEndTime, sizeof(state.queryEndTime));
+        ImGui::SameLine();
+        if (ImGui::Button("Search")) {
+            if (strlen(state.queryStartTime) > 0 && strlen(state.queryEndTime) > 0) {
+                state.queryResults = recorder.findBackupRecordsByBackupTime(
+                    state.queryStartTime, state.queryEndTime);
+                state.isQueryMode = true;
+                state.selectedRecordIndex = -1;
+                if (state.queryResults.empty()) {
+                    state.queryStatusMessage = "No records found in time range: " + 
+                        std::string(state.queryStartTime) + " to " + std::string(state.queryEndTime);
+                } else {
+                    state.queryStatusMessage = "Found " + std::to_string(state.queryResults.size()) + " record(s)";
+                }
+            } else {
+                state.queryStatusMessage = "Error: Please enter both start time and end time";
+            }
+        }
+    }
+
+    // 显示查询状态消息
+    if (!state.queryStatusMessage.empty()) {
+        ImGui::Spacing();
+        if (state.queryStatusMessage.find("Error") != std::string::npos) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
+        }
+        ImGui::TextWrapped("%s", state.queryStatusMessage.c_str());
+        ImGui::PopStyleColor();
+    }
+
+    // 清除查询按钮
+    if (state.isQueryMode) {
+        ImGui::SameLine();
+        if (ImGui::Button("Clear Search")) {
+            state.isQueryMode = false;
+            state.queryResults.clear();
+            state.selectedRecordIndex = -1;
+            state.queryStatusMessage = "";
+            memset(state.queryNameInput, 0, sizeof(state.queryNameInput));
+            memset(state.queryStartTime, 0, sizeof(state.queryStartTime));
+            memset(state.queryEndTime, 0, sizeof(state.queryEndTime));
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // 获取要显示的记录列表
+    std::vector<BackupEntry> displayRecords;
+    if (state.isQueryMode) {
+        displayRecords = state.queryResults;
+    } else {
+        displayRecords = recorder.getBackupRecords();
+    }
+
+    if (displayRecords.empty()) {
+        ImGui::TextWrapped("No backup records found.");
+        return;
+    }
+
+    // 记录列表
+    std::string listTitle = state.isQueryMode ? 
+        "Search Results (" + std::to_string(displayRecords.size()) + " found):" :
+        "Backup Records List (" + std::to_string(displayRecords.size()) + " total):";
+    ImGui::Text("%s", listTitle.c_str());
+    
+    if (ImGui::BeginListBox("##recordsList", ImVec2(-1, 300))) {
+        for (size_t i = 0; i < displayRecords.size(); i++) {
+            const auto& record = displayRecords[i];
+            std::string label = "[" + std::to_string(i) + "] " + record.fileName + " @ " + record.backupTime;
+            
+            if (ImGui::Selectable(label.c_str(), state.selectedRecordIndex == static_cast<int>(i))) {
+                state.selectedRecordIndex = static_cast<int>(i);
+            }
+        }
+        ImGui::EndListBox();
+    }
+
+    // 显示选中记录的详情
+    if (state.selectedRecordIndex >= 0 && state.selectedRecordIndex < static_cast<int>(displayRecords.size())) {
+        const auto& record = displayRecords[state.selectedRecordIndex];
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Text("Record Details:");
+        ImGui::Text("File Name: %s", record.fileName.c_str());
+        ImGui::Text("Source Full Path: %s", record.sourceFullPath.c_str());
+        ImGui::Text("Destination Directory: %s", record.destDirectory.c_str());
+        ImGui::Text("Backup File Name: %s", record.backupFileName.c_str());
+        ImGui::Text("Backup Time: %s", record.backupTime.c_str());
+        ImGui::Text("Is Packed: %s", record.isPacked ? "Yes" : "No");
+        ImGui::Text("Is Compressed: %s", record.isCompressed ? "Yes" : "No");
+        ImGui::Text("Is Encrypted: %s", record.isEncrypted ? "Yes" : "No");
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        
+        // 删除按钮
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
+        if (ImGui::Button("Delete Record", ImVec2(-1, 0))) {
+            // 找到原始记录在完整列表中的索引
+            auto allRecords = recorder.getBackupRecords();
+            size_t originalIndex = recorder.getBackupRecordIndex(record);
+            
+            if (originalIndex != std::string::npos) {
+                // 删除记录
+                if (recorder.deleteBackupRecord(originalIndex)) {
+                    // 保存到文件
+                    recorder.saveBackupRecordsToFile(recorder.getRecorderFilePath());
+                    
+                    // 如果在查询模式下，需要更新查询结果
+                    if (state.isQueryMode) {
+                        // 从查询结果中移除已删除的记录
+                        state.queryResults.erase(state.queryResults.begin() + state.selectedRecordIndex);
+                        // 如果查询结果为空，退出查询模式
+                        if (state.queryResults.empty()) {
+                            state.isQueryMode = false;
+                            state.queryStatusMessage = "";
+                        }
+                    }
+                    
+                    // 清除选中状态
+                    state.selectedRecordIndex = -1;
+                }
+            }
+        }
+        ImGui::PopStyleColor(3);
+    }
+}
+
+int main() {
+    // 初始化 GLFW
+    if (!glfwInit()) {
+        std::cerr << "Failed to initialize GLFW" << std::endl;
+        return -1;
+    }
+
+    // 创建窗口
+    GLFWwindow* window = glfwCreateWindow(1200, 800, "Backup System", nullptr, nullptr);
+    if (!window) {
+        std::cerr << "Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1); // 启用垂直同步
+
+    // 初始化 ImGui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+
+    // 设置样式
+    ImGui::StyleColorsDark();
+
+    // 初始化 ImGui 平台/渲染器绑定
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 130");
+
+    // 初始化备份记录器
+    CBackupRecorder backupRecorder(BACKUP_REPOSITORY_ROOT);
+    backupRecorder.loadBackupRecordsFromFile(backupRecorder.getRecorderFilePath());
+
+    // GUI 状态
+    BackupState backupState;
+    RecoverState recoverState;
+    RecordsState recordsState;
+    strncpy(recordsState.repoPath, BACKUP_REPOSITORY_ROOT.c_str(), sizeof(recordsState.repoPath) - 1);
+
+    // 主循环
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+
+        // 开始 ImGui 帧
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // 创建主窗口
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(io.DisplaySize);
+        ImGui::Begin("Backup System", nullptr, 
+                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | 
+                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_MenuBar);
+
+        // 菜单栏
+        if (ImGui::BeginMenuBar()) {
+            if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("Exit")) {
+                    glfwSetWindowShouldClose(window, true);
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenuBar();
+        }
+
+        // 标签页
+        if (ImGui::BeginTabBar("MainTabs")) {
+            // 备份标签页
+            if (ImGui::BeginTabItem("Backup")) {
+                renderBackupTab(backupState, backupRecorder);
+                ImGui::EndTabItem();
+            }
+
+            // 还原标签页
+            if (ImGui::BeginTabItem("Recover")) {
+                renderRecoverTab(recoverState, backupRecorder);
+                ImGui::EndTabItem();
+            }
+
+            // 备份记录标签页
+            if (ImGui::BeginTabItem("Records")) {
+                renderRecordsTab(recordsState, backupRecorder);
+                ImGui::EndTabItem();
+            }
+
+            ImGui::EndTabBar();
+        }
+
+        ImGui::End();
+
+        // 渲染
+        ImGui::Render();
+        int display_w, display_h;
+        glfwGetFramebufferSize(window, &display_w, &display_h);
+        glViewport(0, 0, display_w, display_h);
+        glClearColor(0.45f, 0.55f, 0.60f, 1.00f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+    }
+
+    // 清理
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
+
     return 0;
 }

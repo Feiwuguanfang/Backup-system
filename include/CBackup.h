@@ -30,6 +30,8 @@ public:
 
     // 恢复相关
     bool doRecovery(const BackupEntry& entry, const std::string& destDir);
+    // 恢复相关（带密码参数，用于GUI）
+    bool doRecovery(const BackupEntry& entry, const std::string& destDir, const std::string& password);
 
 
 private:

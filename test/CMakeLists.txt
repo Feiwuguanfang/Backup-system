@@ -16,5 +16,10 @@ target_link_libraries(test_app PRIVATE
   gtest                      # 依赖GTest库
 )
 
+# 设置编译选项（UTF-8编码支持）
+if(MSVC)
+  target_compile_options(test_app PRIVATE /utf-8 /Zc:__cplusplus)
+endif()
+
 # 添加测试用例（CTest识别）
 add_test(NAME BackupToolTests COMMAND test_app)

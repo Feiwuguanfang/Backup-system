@@ -8,6 +8,14 @@ project(BackupTool VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# 静态运行时库配置（必须在添加子目录之前设置）
+if(MSVC)
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
+  set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /MTd")
+  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /MT")
+endif()
+
 # 添加JSON库
 include(FetchContent)
 # FetchContent_Declare(
@@ -17,11 +25,26 @@ include(FetchContent)
 # )
 # FetchContent_MakeAvailable(json)
 include_directories(${CMAKE_SOURCE_DIR}/lib/json/include)
-# 静态运行时库配置（全局生效）
-if(MSVC)
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-endif()
+
+# 添加GLFW库
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/lib/glfw ${CMAKE_BINARY_DIR}/glfw)
+
+# 添加Dear ImGui库
+file(GLOB IMGUI_SOURCES
+    "${CMAKE_SOURCE_DIR}/lib/imgui/*.cpp"
+    "${CMAKE_SOURCE_DIR}/lib/imgui/backends/imgui_impl_glfw.cpp"
+    "${CMAKE_SOURCE_DIR}/lib/imgui/backends/imgui_impl_opengl3.cpp"
+)
+
+add_library(imgui STATIC ${IMGUI_SOURCES})
+target_include_directories(imgui PUBLIC
+    ${CMAKE_SOURCE_DIR}/lib/imgui
+    ${CMAKE_SOURCE_DIR}/lib/imgui/backends
+)
+target_link_libraries(imgui PUBLIC glfw)
 
 # 设置默认构建类型
 if(NOT CMAKE_BUILD_TYPE)

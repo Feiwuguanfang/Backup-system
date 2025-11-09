@@ -177,6 +177,151 @@ bool CBackup::doRecovery(const BackupEntry& entry, const std::string& destDir) {
     CompressFactory compressFactory;
     if(compressFactory.isCompressedFile(backupRoot + "/" + backupName)){
         std::cout << "Decompressing file:" << backupName << std::endl;
+        // 创建对应类压缩器
+        std::string decompressType = compressFactory.getCompressType(backupRoot + "/" + backupName);
+        if(decompressType.empty()){
+            std::cerr << "Error: Unknown compress type for file: " << backupName << std::endl;
+            return false;
+        }
+        std::unique_ptr<ICompress> decompressor = nullptr;
+        try {
+            decompressor = compressFactory.createCompress(decompressType);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to create decompressor: " << e.what() << std::endl;
+            return false;
+        }
+        // 解压缩到备份目录
+        // 这里是懒得改了
+        std::string sourcePath = backupRoot + "/" + backupName;
+        // 将后缀去除
+        backupName = backupName.substr(0, backupName.find_last_of('.'));
+        if (!decompressor->decompressFile(sourcePath, backupRoot + "/" + backupName)) {
+            std::cerr << "Error: Failed to decompress file: " << backupName << std::endl;
+            return false;
+        }
+        // 解压完成了，如果之前有解密过，那就删除解密后的文件
+        if(isDecrypted){
+            if(!fs::remove(sourcePath)){
+                std::cerr << "Error: Failed to remove compressed file: " << sourcePath << std::endl;
+                return false;
+            }
+        }
+        isDecompressed = true;
+    }
+
+
+    // 最后解包
+    PackFactory packFactory;
+    if (packFactory.isPackedFile(backupRoot + "/" + backupName)) {
+        std::cout << "Unpacking file: " << backupName << std::endl;
+        // 创建对应类型打包器
+        std::string packType = packFactory.getPackType(backupRoot + "/" + backupName);
+        if(packType.empty()){
+            std::cerr << "Error: Unknown pack type for file: " << backupName << std::endl;
+            return false;
+        }
+        std::unique_ptr<IPack> packer = nullptr;
+        try {
+            packer = PackFactory::createPacker(packType);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to create packer: " << e.what() << std::endl;
+            return false;
+        }
+        // 解包到源文件目录
+        if (!packer->unpack(backupRoot + "/" + backupName, destDir)) {
+            std::cerr << "Error: Failed to unpack file: " << backupName << std::endl;
+            return false;
+        }
+        // 解包完成了，如果之前有解密过或者压缩过，那就删除解密后的文件或者压缩后的文件
+        if(isDecompressed || isDecrypted){
+            if(!fs::remove(backupRoot + "/" + backupName)){
+                std::cerr << "Error: Failed to remove packed file: " << backupRoot + "/" + backupName << std::endl;
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // 非打包：按路径直接复制
+    // 入口记录里 sourceFullPath 是原文件应恢复到的绝对路径
+    // 这里改为恢复到 destDir 下的相对路径
+    const fs::path restorePath = fs::path(destDir) / entry.sourceFullPath.substr(entry.sourceFullPath.find_last_of('/') + 1);
+    try {
+        fs::create_directories(restorePath.parent_path());
+    } catch (const std::exception& e) {
+        std::cerr << "Error creating directory for restore: " << e.what() << std::endl;
+        return false;
+    }
+
+    // 直接复制文件
+    try {
+        if (!fs::exists(backupPath)) {
+            std::cerr << "Error: backup file not found: " << backupPath.string() << std::endl;
+            return false;
+        }
+        fs::copy_file(backupPath, restorePath, fs::copy_options::overwrite_existing);
+    } catch (const std::exception& e) {
+        std::cerr << "Error restoring file: " << e.what() << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+// 带密码参数的重载版本（用于GUI）
+bool CBackup::doRecovery(const BackupEntry& entry, const std::string& destDir, const std::string& password) {
+    // 基础恢复：
+    // - 若是打包：调用解包器（此处保留输出提示，具体实现按打包器完成）
+    // - 若非打包：从备份目录将文件按原始相对路径复制回去
+
+    const std::string backupRoot = entry.destDirectory; // 记录中的目标目录（备份落地位置）
+    std::string backupName = entry.backupFileName; // 记录中的备份文件名或相对路径
+
+    const fs::path backupPath = fs::path(backupRoot) / backupName;  
+    // 删除的话保留最初的备份文件，形成的中间文件都被删掉
+    bool isDecrypted = false;
+    bool isDecompressed = false;
+
+    // 先解密
+    EncryptFactory encryptFactory;
+    if(encryptFactory.isFileEncrypted(backupRoot + "/" + backupName)){
+        std::cout << "Decrypting file:" << backupName << std::endl;
+
+        // 使用提供的密码
+        if(password.empty()){
+            std::cerr << "Error: Password is required for encrypted file" << std::endl;
+            return false;
+        }
+
+        // 创建对应类型加密器
+        std::string encryptType = encryptFactory.getEncryptType(backupRoot + "/" + backupName);
+        if(encryptType.empty()){
+            std::cerr << "Error: Unknown encrypt type for file: " << backupName << std::endl;
+            return false;
+        }
+        std::unique_ptr<IEncrypt> decryptor = nullptr;
+        try {
+            decryptor = encryptFactory.createEncryptor(encryptType);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to create decryptor: " << e.what() << std::endl;
+            return false;
+        }
+        // 解密到备份目录
+        // 这里是懒得改了
+        std::string sourcePath = backupRoot + "/" + backupName;
+        // 将后缀去除
+        backupName = backupName.substr(0, backupName.find_last_of('.'));
+        if (!decryptor->decryptFile(sourcePath, backupRoot + "/" + backupName, password)) {
+            std::cerr << "Error: Failed to decrypt file: " << backupName << std::endl;
+            return false;
+        }
+        isDecrypted = true;
+    }
+
+    // 再解压缩
+    CompressFactory compressFactory;
+    if(compressFactory.isCompressedFile(backupRoot + "/" + backupName)){
+        std::cout << "Decompressing file:" << backupName << std::endl;
         // 创建对应类型打包器
         std::string decompressType = compressFactory.getCompressType(backupRoot + "/" + backupName);
         if(decompressType.empty()){
